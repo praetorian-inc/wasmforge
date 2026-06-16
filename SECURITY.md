@@ -28,20 +28,9 @@ negotiate longer windows for complex issues.
 
 We treat the following as security issues and triage them accordingly:
 
-- **WASM↔host sandbox escapes** — guest WASM code escaping the wazero
-  sandbox via the host module (`internal/hostmod/`), the sysshim
-  (`internal/sysshim/`), the `dotnet/bridge/` C bridge, or the wazero
-  fork in `wazero/`.
-- **Memory-safety bugs** in the host module, pointer translation
-  (`win32_windows_dll.go`), shadow memory, or the mirror table — anything
-  that could be triggered by a crafted guest binary to read or write
-  outside the intended memory regions.
 - **Supply-chain risks** in the build pipeline — anything that lets
   compiling a wasmforge-built binary inject code into the developer's
   host machine beyond the documented `go build`/`dotnet publish` steps.
-- **Accidental capability leaks** — host functions that expose more
-  than their advertised surface (e.g., a Win32 wrapper that turns into
-  an arbitrary-syscall primitive).
 
 ## Out of Scope
 
