@@ -126,7 +126,7 @@ Registered in `internal/hostmod/pipe.go`.
 ## --win32-apis Go-side surface (non-NativeAOT)
 
 Functions used by `wasmforge build --win32-apis` with Go source input
-(Sliver, Tribunus, gogokatz, goffloader, etc.). Registered via
+(Sliver, goffloader, etc.). Registered via
 `internal/hostmod/win32.go`. Not exercised by the Rubeus/Seatbelt parity
 tests, but kept for the broader product surface.
 

@@ -1,5 +1,6 @@
 // Package unix provides minimal stubs of golang.org/x/sys/unix for wasip1.
-// Only functions actually used by Sibyl are implemented.
+// Only functions actually exercised by validated guests are implemented;
+// adding more is mechanical when a new caller surfaces.
 
 //go:build wasip1
 

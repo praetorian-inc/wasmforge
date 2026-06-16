@@ -1,5 +1,5 @@
 // win32_clr_load tests _AppDomain::Load_3 with a real .NET assembly.
-// Uses ICorRuntimeHost + SyscallN (same as go-clr/Tribunus).
+// Uses ICorRuntimeHost + SyscallN (the standard go-clr pattern).
 //
 // Build: GOOS=windows GOARCH=amd64 wasmforge build --win32-apis -v -o clr_load.exe ./testdata/win32_clr_load
 // Run: Copy Seatbelt.exe to C:\Temp\ on Win11, then run clr_load.exe

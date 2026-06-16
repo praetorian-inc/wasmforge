@@ -43,18 +43,6 @@ rubeus_path = ""
 native_seatbelt_path = ""
 native_rubeus_path = ""
 
-[mythic]
-# Enable Mythic/Tribunus integration tests.
-enabled = false
-# Mythic API URL (Hasura GraphQL endpoint).
-api_url = "https://10.3.10.99:7443"
-# Mythic admin username.
-username = "mythic_admin"
-# Env var containing Mythic admin password.
-password_env = "WFTEST_MYTHIC_PASSWORD"
-# Path to Tribunus agent source.
-tribunus_source = ""
-
 [proxy]
 # Enable proxy tool tests (chisel, ligolo-ng).
 enabled = false
