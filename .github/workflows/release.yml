@@ -32,22 +32,26 @@ jobs:
 
   build:
     needs: generate-assets
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runs-on }}
     strategy:
       matrix:
         include:
-          - goos: windows
-            goarch: amd64
-            ext: .exe
           - goos: linux
             goarch: amd64
             ext: ''
+            runs-on: ubuntu-latest
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+            runs-on: windows-latest
           - goos: darwin
             goarch: amd64
             ext: ''
+            runs-on: macos-13
           - goos: darwin
             goarch: arm64
             ext: ''
+            runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -67,7 +71,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: '0'
+          CGO_ENABLED: '1'
           GOWORK: 'off'
         run: go build -trimpath -o wasmforge-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/wasmforge
 
