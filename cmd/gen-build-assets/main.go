@@ -112,6 +112,15 @@ func generateArchive(moduleRoot, wazeroDir, outputPath string) (int, error) {
 		totalFiles += n
 	}
 
+	// Add sysshim tree (recursive — has subdirs and per-subdir go.mod files).
+	// Needed at runtime when a guest depends on golang.org/x/sys and the
+	// wasmforge module source isn't otherwise locatable on disk.
+	n, err = addSysshimDir(tw, filepath.Join(moduleRoot, "internal", "sysshim"))
+	if err != nil {
+		return 0, fmt.Errorf("adding sysshim: %w", err)
+	}
+	totalFiles += n
+
 	// Add go.sum.
 	gosumPath := filepath.Join(moduleRoot, "go.sum")
 	if err := addFile(tw, gosumPath, "go.sum"); err != nil {
@@ -120,6 +129,38 @@ func generateArchive(moduleRoot, wazeroDir, outputPath string) (int, error) {
 	totalFiles++
 
 	return totalFiles, nil
+}
+
+// addSysshimDir adds the internal/sysshim tree under the "sysshim/" prefix.
+// Walks recursively because sysshim has nested subdirs (unix, purego,
+// windows, windows/svc, etc.) and per-subdir go.mod files that the
+// injection step needs at runtime. Includes *.go, *.s, and go.mod; excludes
+// _test.go.
+func addSysshimDir(tw *tar.Writer, sysshimDir string) (int, error) {
+	count := 0
+	err := filepath.Walk(sysshimDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		name := info.Name()
+		if name != "go.mod" && !isSourceFile(name) {
+			return nil
+		}
+		rel, err := filepath.Rel(sysshimDir, path)
+		if err != nil {
+			return err
+		}
+		archivePath := filepath.ToSlash(filepath.Join("sysshim", rel))
+		if err := addFile(tw, path, archivePath); err != nil {
+			return err
+		}
+		count++
+		return nil
+	})
+	return count, err
 }
 
 // addWazeroDir adds the wazero fork to the archive under the "wazero/" prefix.

@@ -254,6 +254,19 @@ func CompileWASM(patchedGOROOT, pkg, tmpDir string, verbose, win32APIs bool, tar
 	return wasmOut, nil
 }
 
+// sysshimSourceBase returns a directory B such that filepath.Join(B,
+// "sysshim", <pkg>) is a valid wasmforge sysshim package source tree.
+// In development mode (wasmforge module source on disk), B is
+// <moduleRoot>/internal. In distribution mode (standalone binary), B is
+// the cached temp directory populated from the embedded build_assets
+// bundle, where the sysshim tree was packed under the "sysshim/" prefix.
+func sysshimSourceBase() (string, error) {
+	if root := findModuleRoot(); root != "" {
+		return filepath.Join(root, "internal"), nil
+	}
+	return ensureAssetsExtracted()
+}
+
 // injectSysshimReplace checks whether the guest module at pkgDir depends on
 // golang.org/x/sys. If it does, it creates a temporary copy of the module
 // directory with the sysshim replacing the original x/sys code. For vendored
@@ -274,15 +287,16 @@ func injectSysshimReplace(pkgDir, tmpDir string, verbose, win32APIs bool) (strin
 		return "", nil
 	}
 
-	// Locate the sysshim directory (relative to the wasmforge module root).
-	moduleRoot := findModuleRoot()
-	if moduleRoot == "" {
+	// Locate the sysshim directory (relative to the wasmforge module root, or
+	// from the embedded build assets when running as a standalone binary).
+	base, sysErr := sysshimSourceBase()
+	if sysErr != nil {
 		if win32APIs {
-			return "", fmt.Errorf("cannot find wasmforge module root for sysshim injection")
+			return "", fmt.Errorf("locating wasmforge sysshim source: %w", sysErr)
 		}
 		return "", nil
 	}
-	sysshimDir := filepath.Join(moduleRoot, "internal", "sysshim")
+	sysshimDir := filepath.Join(base, "sysshim")
 	if _, err := os.Stat(sysshimDir); err != nil {
 		if win32APIs {
 			return "", fmt.Errorf("sysshim directory not found at %s", sysshimDir)
@@ -567,11 +581,11 @@ func injectPuregoSysshimReplace(pkgDir, tmpDir string, verbose bool) (string, er
 		return "", nil
 	}
 
-	moduleRoot := findModuleRoot()
-	if moduleRoot == "" {
-		return "", fmt.Errorf("cannot find wasmforge module root for purego sysshim injection")
+	base, sysErr := sysshimSourceBase()
+	if sysErr != nil {
+		return "", fmt.Errorf("locating wasmforge purego sysshim source: %w", sysErr)
 	}
-	puregoSysshimDir := filepath.Join(moduleRoot, "internal", "sysshim", "purego")
+	puregoSysshimDir := filepath.Join(base, "sysshim", "purego")
 	if _, err := os.Stat(puregoSysshimDir); err != nil {
 		return "", fmt.Errorf("purego sysshim directory not found at %s", puregoSysshimDir)
 	}
