@@ -82,8 +82,8 @@ GOWORK=off GOOS=darwin GOARCH=amd64 /tmp/wasmforge-bin build \
 - **Platform-specific source.** Windows and macOS Sliver sources are NOT interchangeable. Windows `runner.go` references `handlers.WrapperHandler` (token impersonation) which only exists in `handlers_windows.go`. Always generate source targeting the correct OS.
 - **Beacon vs Session.** Beacons check in periodically (tasks are queued). Sessions are interactive and support SOCKS5 proxying. Choose based on your use case.
 - **`--skip-symbols`.** Recommended to reduce compile time. Sliver's symbol obfuscation adds significant build time and isn't needed since WasmForge already provides its own obfuscation layers.
-- **`--tags`.** Use for programs that gate features behind build tags (e.g., [Tribunus](https://github.com/praetorian-inc/tribunus) uses `-tags "shell,ps,netstat"` to enable specific command handlers).
-- **Binary sizes.** ~34.5MB (Windows), ~29.7MB (macOS), ~12.9MB ([Tribunus](https://github.com/praetorian-inc/tribunus)).
+- **`--tags`.** Use for programs that gate features behind build tags (e.g., `-tags "shell,ps,netstat"` to enable specific command handlers in an agent that supports it).
+- **Binary sizes.** ~34.5MB (Windows), ~29.7MB (macOS).
 
 ## Verified Commands
 
@@ -92,7 +92,6 @@ GOWORK=off GOOS=darwin GOARCH=amd64 /tmp/wasmforge-bin build \
 | Windows  | Sliver                                                 | Beacon  | `whoami`, `ls`, `pwd`, `execute`, `info`, `getprivs`, `ps`, `netstat`, `ifconfig`, `execute-assembly` (Rubeus, Seatbelt) |
 | macOS    | Sliver                                                 | Beacon  | `pwd`, `ls`, `download`, `mkdir`, `execute`                                                      |
 | macOS    | Sliver                                                 | Session | `pwd`, `ls`, `download`, `mkdir`, `execute`, SOCKS5 proxy                                        |
-| Windows  | [Tribunus](https://github.com/praetorian-inc/tribunus) (Mythic) | Agent | `shell` (whoami, dir, ipconfig, hostname, echo, ver), `whoami`, `ps`, `netstat`                  |
 
 ## Related Documentation
 

@@ -124,8 +124,9 @@ func CompileWASM(patchedGOROOT, pkg, tmpDir string, verbose, win32APIs bool, tar
 	}
 
 	// Inject wasip1 overrides for unsafe host pointer dereference patterns.
-	// Sibyl's transport/unsafe_helpers.go uses unsafe.Slice on host pointers
-	// which traps in WASM. Replace with darwin.ReadHostMemory-based versions.
+	// Guests that use unsafe.Slice on host pointers (common in transport
+	// helpers around purego/ObjC) trap in WASM. Replace with
+	// darwin.ReadHostMemory-based versions.
 	if workDir != "" && workDir != originalWorkDir && targetGOOS == "darwin" {
 		if n, err := injectUnsafeHelperOverrides(workDir, verbose); err != nil && verbose {
 			fmt.Fprintf(os.Stderr, "wasmforge: unsafe helper override warning: %v\n", err)
@@ -441,8 +442,8 @@ func injectSysshimVendored(shadowDir, sysshimDir string, verbose bool) error {
 }
 
 // injectUnsafeHelperOverrides walks the shadow copy looking for Go files that
-// use unsafe.Slice to dereference host pointers (e.g., Sibyl's
-// transport/unsafe_helpers.go). For each match, it injects a _wasip1.go
+// use unsafe.Slice to dereference host pointers (a common pattern in transport
+// helpers built around purego/ObjC). For each match, it injects a _wasip1.go
 // override that uses darwin.ReadHostMemory instead.
 func injectUnsafeHelperOverrides(workDir string, verbose bool) (int, error) {
 	count := 0

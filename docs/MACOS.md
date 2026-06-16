@@ -65,9 +65,6 @@ Go programs using [`ebitengine/purego`](https://github.com/ebitengine/purego) fo
 | ---------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------- |
 | **Sliver** (beacon)                                              | C2 framework                                         | `pwd`, `ls`, `download`, `mkdir`, `execute`                     |
 | **Sliver** (session)                                             | C2 framework, interactive mode                       | `pwd`, `ls`, `download`, `mkdir`, `execute`, SOCKS5 proxy       |
-| **[Sibyl](https://github.com/praetorian-inc/sibyl)**             | Mythic C2 agent using `purego/objc`                  | NSURLSession transport, ObjC class registration, TLS delegate, `dispatch_semaphore`, full agent init |
-
-[Sibyl](https://github.com/praetorian-inc/sibyl) demonstrates the most complex purego/ObjC integration validated to date — a fully native-looking macOS agent that compiles through WasmForge with zero source modifications.
 
 ## Building Sliver for macOS
 

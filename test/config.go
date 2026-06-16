@@ -14,7 +14,6 @@ type Config struct {
 	WasmForge WasmForgeConfig `toml:"wasmforge"`
 	Remote    RemoteConfig    `toml:"remote"`
 	Sliver    SliverConfig    `toml:"sliver"`
-	Mythic    MythicConfig    `toml:"mythic"`
 	Proxy     ProxyConfig     `toml:"proxy"`
 	Dotnet    DotnetConfig    `toml:"dotnet"`
 }
@@ -60,14 +59,6 @@ type SliverConfig struct {
 	// Leave empty to skip the execute-assembly subtests.
 	NativeSeatbeltPath string `toml:"native_seatbelt_path"`
 	NativeRubeusPath   string `toml:"native_rubeus_path"`
-}
-
-type MythicConfig struct {
-	Enabled        bool   `toml:"enabled"`
-	APIURL         string `toml:"api_url"`
-	Username       string `toml:"username"`
-	PasswordEnv    string `toml:"password_env"`
-	TribunusSource string `toml:"tribunus_source"`
 }
 
 type ProxyConfig struct {
@@ -123,7 +114,6 @@ func LoadConfig() (*Config, error) {
 	cfg.Sliver.RubeusPath = expandHome(cfg.Sliver.RubeusPath)
 	cfg.Sliver.NativeSeatbeltPath = expandHome(cfg.Sliver.NativeSeatbeltPath)
 	cfg.Sliver.NativeRubeusPath = expandHome(cfg.Sliver.NativeRubeusPath)
-	cfg.Mythic.TribunusSource = expandHome(cfg.Mythic.TribunusSource)
 	cfg.Proxy.ChiselSource = expandHome(cfg.Proxy.ChiselSource)
 	cfg.Proxy.LigoloSource = expandHome(cfg.Proxy.LigoloSource)
 	cfg.Dotnet.SeatbeltSource = expandHome(cfg.Dotnet.SeatbeltSource)

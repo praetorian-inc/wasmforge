@@ -121,7 +121,7 @@ const maxRegAllocStructSize = 16
 
 // Send is a convenience method for sending messages to objects that can return any type.
 // Note: objc_msgSend_stret is not registered in this sysshim. Struct returns >16 bytes
-// on amd64 will panic. Sibyl only uses pointer/integer returns via ObjC messaging.
+// on amd64 will panic. Validated guests only use pointer/integer returns via ObjC messaging.
 func Send[T any](id ID, sel SEL, args ...any) T {
 	var zero T
 	if reflect.ValueOf(zero).Kind() == reflect.Struct &&

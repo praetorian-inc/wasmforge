@@ -82,7 +82,7 @@ func main() {
 		passed++
 	}
 
-	// Test 7: Get NSURLSession class (Sibyl's transport)
+	// Test 7: Get NSURLSession class (typical transport bootstrapping)
 	nsURLSessionClass := objc.GetClass("NSURLSession")
 	if nsURLSessionClass == 0 {
 		fmt.Fprintf(os.Stderr, "FAIL: GetClass NSURLSession = 0\n")
