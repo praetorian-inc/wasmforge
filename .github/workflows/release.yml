@@ -45,11 +45,7 @@ jobs:
             ext: .exe
             runs-on: windows-latest
           - goos: darwin
-            goarch: amd64
-            ext: ''
-            runs-on: macos-13
-          - goos: darwin
-            goarch: arm64
+            goarch: universal
             ext: ''
             runs-on: macos-latest
     steps:
@@ -67,13 +63,28 @@ jobs:
           name: build-assets
           path: internal/build
 
-      - name: Build
+      - name: Build (single arch)
+        if: matrix.goarch != 'universal'
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '1'
           GOWORK: 'off'
         run: go build -trimpath -o wasmforge-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/wasmforge
+
+      - name: Build darwin universal binary (arm64 + amd64 via lipo)
+        if: matrix.goos == 'darwin' && matrix.goarch == 'universal'
+        env:
+          CGO_ENABLED: '1'
+          GOWORK: 'off'
+        run: |
+          GOOS=darwin GOARCH=arm64 \
+            go build -trimpath -o wasmforge-darwin-arm64 ./cmd/wasmforge
+          GOOS=darwin GOARCH=amd64 CC="clang -arch x86_64" CXX="clang++ -arch x86_64" \
+            go build -trimpath -o wasmforge-darwin-amd64 ./cmd/wasmforge
+          lipo -create -output wasmforge-darwin-universal \
+            wasmforge-darwin-arm64 wasmforge-darwin-amd64
+          lipo -info wasmforge-darwin-universal
 
       - uses: actions/upload-artifact@v4
         with:
