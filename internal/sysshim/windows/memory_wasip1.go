@@ -73,6 +73,11 @@ var shadowKeepAlive sync.Map // wasmAddr (uintptr) → []byte
 // The returned uintptr is within WASM's address space and can be used with
 // unsafe.Pointer for direct reads/writes.
 func VirtualAlloc(address uintptr, size uintptr, alloctype uint32, protect uint32) (uintptr, error) {
+	// Sub-commits within an existing reservation reuse the shadow allocation.
+	if address != 0 && (alloctype&MEM_RESERVE) == 0 {
+		return address, nil
+	}
+
 	// Allocate a byte slice in WASM linear memory. This gives us an address
 	// within the WASM address space that can be used with unsafe.Pointer.
 	shadow := make([]byte, size)
@@ -120,4 +125,26 @@ func VirtualFree(address uintptr, size uintptr, freetype uint32) error {
 // VirtualQuery is a stub that returns basic information about a shadow allocation.
 func VirtualQuery(address uintptr, buffer *MemoryBasicInformation, length uintptr) error {
 	return syscall.ENOSYS
+}
+
+// ShadowGetHostAddr returns the host address for a WASM shadow allocation.
+func ShadowGetHostAddr(wasmAddr uintptr) (uintptr, error) {
+	var buf [8]byte
+	errno := syscall.ShadowGetHostAddr(uint32(wasmAddr), uint32(uintptr(unsafe.Pointer(&buf[0]))))
+	if errno != 0 {
+		return 0, syscall.Errno(errno)
+	}
+	addr := uint64(buf[0]) | uint64(buf[1])<<8 | uint64(buf[2])<<16 | uint64(buf[3])<<24 |
+		uint64(buf[4])<<32 | uint64(buf[5])<<40 | uint64(buf[6])<<48 | uint64(buf[7])<<56
+	return uintptr(addr), nil
+}
+
+// ShadowCallEntry syncs memory and calls DllMain in the host allocation.
+func ShadowCallEntry(wasmAddr uintptr, entryOffset uint32, fdwReason uint32) (uint32, error) {
+	var result uint32
+	errno := syscall.ShadowCallEntry(uint32(wasmAddr), entryOffset, fdwReason, uint32(uintptr(unsafe.Pointer(&result))))
+	if errno != 0 {
+		return 0, syscall.Errno(errno)
+	}
+	return result, nil
 }

@@ -56,6 +56,14 @@ func shadow_virtual_protect(wasmAddr uint32, size uint32, newProtect uint32, old
 //go:noescape
 func shadow_virtual_free(wasmAddr uint32, size uint32, freeType uint32) uint32
 
+//go:wasmimport env shm_host_addr
+//go:noescape
+func shadow_host_addr(wasmAddr uint32, addrPtr uint32) uint32
+
+//go:wasmimport env shm_call_entry
+//go:noescape
+func shadow_call_entry(wasmAddr uint32, entryOffset uint32, fdwReason uint32, resultPtr uint32) uint32
+
 // ShadowVirtualAlloc registers a shadow allocation. wasmAddr is the WASM-side
 // buffer address, size/allocType/protect are the VirtualAlloc parameters.
 // Returns 0 on success, or a Windows error code.
@@ -72,6 +80,18 @@ func ShadowVirtualProtect(wasmAddr, size, newProtect, oldProtectPtr uint32) uint
 // ShadowVirtualFree releases a shadow allocation. Returns 0 on success.
 func ShadowVirtualFree(wasmAddr, size, freeType uint32) uint32 {
 	return shadow_virtual_free(wasmAddr, size, freeType)
+}
+
+// ShadowGetHostAddr returns the real host address for a WASM shadow
+// allocation address. Returns 0 on success.
+func ShadowGetHostAddr(wasmAddr uint32, addrPtr uint32) uint32 {
+	return shadow_host_addr(wasmAddr, addrPtr)
+}
+
+// ShadowCallEntry syncs WASM→Host and calls the DLL entry point at
+// entryOffset in the host shadow allocation. Returns 0 on success.
+func ShadowCallEntry(wasmAddr, entryOffset, fdwReason, resultPtr uint32) uint32 {
+	return shadow_call_entry(wasmAddr, entryOffset, fdwReason, resultPtr)
 }
 
 // putUint64LE writes v to b in little-endian order.
@@ -228,6 +248,12 @@ func (p *Proc) Call(a ...uintptr) (uintptr, uintptr, error) {
 // The sysshim uses this to drain extension API output after BOF execution.
 var AfterSyscallNHook func(trap uintptr)
 
+// ExtensionCallbackFn stores the most recently registered extension callback
+// (func(data uintptr, dataLen uintptr) uintptr) so the sysshim drain hook
+// can invoke it with data read from the host buffer. Set by syscall.NewCallback
+// when the function signature matches the extension callback pattern.
+var ExtensionCallbackFn func(uintptr, uintptr) uintptr
+
 // SyscallN calls a Windows procedure with N arguments.
 // This is the primary interception point — golang.org/x/sys/windows
 // routes all Windows API calls through this function.
@@ -305,14 +331,37 @@ func win32_new_callback(namePtr *byte, nameLen int32, addrPtr *byte) int32
 
 // NewCallback creates a native function pointer from a Go function.
 // On wasip1, this sends a hint to the host which maps it to a pre-created
-// Extension API callback. Returns 0 if the callback type is not recognized.
+// Extension API callback. The hint tells the host which callback type to
+// return. This package avoids reflect to prevent a syscall import cycle, so
+// matching is limited to known callback signatures.
 func NewCallback(fn interface{}) uintptr {
-	// On wasip1, we can't use reflect (import cycle with syscall).
-	// Send empty hint — host returns a generic callback or 0.
+	var hint string
+	switch cb := fn.(type) {
+	case func(uintptr, uintptr) uintptr:
+		hint = "extensionCallback"
+		ExtensionCallbackFn = cb
+	case func(int, uintptr, int) uintptr:
+		hint = "Output"
+	case func(uintptr, uintptr, uintptr) uintptr:
+		hint = "Output"
+	case func(uintptr) uintptr:
+		hint = "DataLength"
+	case func(uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr) uintptr:
+		hint = "Printf"
+	}
+
 	var addrBuf [8]byte
-	errno := win32_new_callback(nil, 0, &addrBuf[0])
-	if errno != 0 {
-		return 0
+	if hint != "" {
+		hintBytes := []byte(hint)
+		errno := win32_new_callback(&hintBytes[0], int32(len(hintBytes)), &addrBuf[0])
+		if errno != 0 {
+			return 0
+		}
+	} else {
+		errno := win32_new_callback(nil, 0, &addrBuf[0])
+		if errno != 0 {
+			return 0
+		}
 	}
 	return uintptr(getUint64LE(addrBuf[:]))
 }

@@ -32,9 +32,9 @@ func TestRun_SyntheticProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create fake helpers directory with the four required .cs files.
+	// Create fake helpers directory with the required .cs files.
 	helpersDir := t.TempDir()
-	for _, name := range []string{"WfHostBridge.cs", "LsaHostHelper.cs", "CryptoHostHelper.cs", "NetworkHostHelper.cs"} {
+	for _, name := range helperNames {
 		if err := os.WriteFile(filepath.Join(helpersDir, name), []byte("// "+name), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -42,15 +42,7 @@ func TestRun_SyntheticProject(t *testing.T) {
 
 	// Create fake stubs directory with the required stub projects.
 	stubsDir := t.TempDir()
-	for _, name := range []string{
-		"System.DirectoryServices",
-		"System.DirectoryServices.AccountManagement",
-		"System.DirectoryServices.ActiveDirectory",
-		"System.DirectoryServices.Protocols",
-		"System.IdentityModel.Tokens",
-		"CERTENROLLLib",
-		"CERTCLILib",
-	} {
+	for _, name := range stubDirNames {
 		dir := filepath.Join(stubsDir, name)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
@@ -120,8 +112,8 @@ func TestRun_SyntheticProject(t *testing.T) {
 	}
 
 	// Verify helpers injected.
-	if len(result.InjectedHelpers) != 4 {
-		t.Errorf("expected 4 injected helpers, got %d", len(result.InjectedHelpers))
+	if len(result.InjectedHelpers) != len(helperNames) {
+		t.Errorf("expected %d injected helpers, got %d", len(helperNames), len(result.InjectedHelpers))
 	}
 
 	// Verify WasmForge/ subdir exists.

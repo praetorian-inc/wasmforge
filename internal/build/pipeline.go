@@ -54,6 +54,9 @@ type Options struct {
 	// NativeAOT enables NativeAOT-WASI-specific host functions (WMI, SDDL, LSA,
 	// RPC, WASI P2 stubs). The host binary is compiled with -tags nativeaot.
 	NativeAOT bool
+	// NoAMSIPatch disables the runtime AMSI patch. Go payloads don't need it;
+	// skipping it avoids Elastic Defend's AMSI-bypass behavioral alerts.
+	NoAMSIPatch bool
 	// PrecompiledWASM, when set, skips the Go→WASM compilation step and uses
 	// the specified WASM file directly. Used for NativeAOT-WASI modules that
 	// are compiled externally (e.g., .NET NativeAOT-LLVM).
@@ -220,13 +223,14 @@ func Run(opts Options) error {
 
 	// Step 5: Generate host binary.
 	hostCfg := HostConfig{
-		RawSockets: opts.RawSockets,
-		Win32APIs:  opts.Win32APIs,
-		DarwinAPIs: opts.DarwinAPIs,
-		NativeAOT:  opts.NativeAOT,
-		FSMounts:   opts.FSMounts,
-		PE:         opts.PE,
-		Ghost:      opts.Ghost,
+		RawSockets:  opts.RawSockets,
+		Win32APIs:   opts.Win32APIs,
+		DarwinAPIs:  opts.DarwinAPIs,
+		NativeAOT:   opts.NativeAOT,
+		NoAMSIPatch: opts.NoAMSIPatch,
+		FSMounts:    opts.FSMounts,
+		PE:          opts.PE,
+		Ghost:       opts.Ghost,
 	}
 
 	if err := GenerateHost(wasmPath, output, tmpDir, hostCfg, opts.Verbose); err != nil {

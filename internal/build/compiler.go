@@ -156,7 +156,7 @@ func CompileWASM(patchedGOROOT, pkg, tmpDir string, verbose, win32APIs bool, tar
 	var contested []contestedPair
 	var excluded []excludedFile
 	if win32APIs && workDir != "" {
-		contested, excluded, err = relaxWindowsBuildConstraints(workDir, verbose)
+		contested, excluded, err = relaxWindowsBuildConstraints(workDir, verbose, targetGOARCH)
 		if err != nil {
 			return "", fmt.Errorf("relaxing build constraints: %w", err)
 		}
@@ -173,7 +173,7 @@ func CompileWASM(patchedGOROOT, pkg, tmpDir string, verbose, win32APIs bool, tar
 	//
 	// Only run on shadow copies — this mutates go.mod with replace directives.
 	if workDir != "" && workDir != originalWorkDir {
-		if err := fixModCachePanicFallbacks(workDir, goBin, buildEnv, tmpDir, win32APIs, verbose); err != nil && verbose {
+		if err := fixModCachePanicFallbacks(workDir, goBin, buildEnv, tmpDir, win32APIs, verbose, targetGOARCH); err != nil && verbose {
 			fmt.Fprintf(os.Stderr, "wasmforge: modcache panic fallback fix warning: %v\n", err)
 		}
 	}
@@ -757,7 +757,11 @@ func injectPuregoSysshimVendored(shadowDir, puregoSysshimDir string, verbose boo
 //   - "//go:build ... windows ..." gets "|| wasip1" added so the file compiles
 //   - "//go:build !windows" or "!darwin && !windows && !linux" files that would
 //     conflict with an enabled _windows.go counterpart are disabled
-func relaxWindowsBuildConstraints(dir string, verbose bool) ([]contestedPair, []excludedFile, error) {
+func relaxWindowsBuildConstraints(dir string, verbose bool, targetGOARCH ...string) ([]contestedPair, []excludedFile, error) {
+	var filterArch string
+	if len(targetGOARCH) > 0 {
+		filterArch = targetGOARCH[0]
+	}
 	count := 0
 	rewrittenCount := 0
 	var contested []contestedPair
@@ -901,6 +905,17 @@ func relaxWindowsBuildConstraints(dir string, verbose bool) ([]contestedPair, []
 		name := strings.TrimSuffix(base, ".go")
 		if !hasWindowsSuffix(name) {
 			return nil
+		}
+
+		// Keep only _windows_<arch>.go files that match the target GOARCH.
+		if filterArch != "" {
+			if fileArch := windowsFileArch(name); fileArch != "" && fileArch != filterArch {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "wasmforge: skipping %s (arch %s != target %s)\n", base, fileArch, filterArch)
+				}
+				disabledPath := path + ".disabled"
+				return os.Rename(path, disabledPath)
+			}
 		}
 
 		newName := removeWindowsSuffix(name) + ".go"
@@ -1070,6 +1085,92 @@ func relaxWindowsBuildConstraints(dir string, verbose bool) ([]contestedPair, []
 	if err != nil {
 		return nil, nil, err
 	}
+	// Third pass: include matching *_windows_32.go / *_windows_64.go files
+	// that define bitwidth-specific runtime types.
+	if filterArch != "" {
+		targetBitwidth := archBitwidth(filterArch)
+		if targetBitwidth != "" {
+			err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				if info.IsDir() {
+					if path == sysshimVendorDir || shouldSkipDir(path) {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				if !strings.HasSuffix(path, ".go") {
+					return nil
+				}
+				base := filepath.Base(path)
+				name := strings.TrimSuffix(base, ".go")
+				// Match *_windows_64 or *_windows_32 (bitwidth, not Go arch).
+				parts := strings.Split(name, "_")
+				n := len(parts)
+				if n < 3 {
+					return nil
+				}
+				if parts[n-2] != "windows" {
+					return nil
+				}
+				fileBitwidth := parts[n-1]
+				if fileBitwidth != "32" && fileBitwidth != "64" {
+					return nil
+				}
+				if fileBitwidth != targetBitwidth {
+					return nil
+				}
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return nil
+				}
+				lines := strings.Split(string(data), "\n")
+				changed := false
+				for i, line := range lines {
+					trimmed := strings.TrimSpace(line)
+					if strings.HasPrefix(trimmed, "//go:build ") {
+						constraint := strings.TrimPrefix(trimmed, "//go:build ")
+						if strings.Contains(constraint, "wasip1") {
+							break
+						}
+						if strings.Contains(constraint, "windows") && containsArch(constraint) {
+							lines[i] = "//go:build " + constraint + " || wasip1"
+							changed = true
+						}
+					}
+					if strings.HasPrefix(trimmed, "package ") {
+						break
+					}
+				}
+				if changed {
+					newData := []byte(strings.Join(lines, "\n"))
+					newData = rewriteSyscallTypeMismatches(newData)
+					// Do not pad uintptr fields: Go's wasip1/wasm uintptr is already
+					// 8 bytes, so PE64 structs have the correct layout.
+					if err := os.WriteFile(path, newData, info.Mode()); err != nil {
+						return fmt.Errorf("rewriting bitwidth build tags in %s: %w", path, err)
+					}
+					rewrittenCount++
+					if verbose {
+						fmt.Fprintf(os.Stderr, "wasmforge: included %s for wasip1 (bitwidth %s matches target %s)\n", base, fileBitwidth, filterArch)
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+
+	// Fourth pass: patch memmod for shadow-memory execution.
+	if filterArch != "" && archBitwidth(filterArch) == "64" {
+		if err := patchMemmodForWASM(dir, verbose); err != nil && verbose {
+			fmt.Fprintf(os.Stderr, "wasmforge: memmod WASM patch warning: %v\n", err)
+		}
+	}
+
 	if verbose {
 		if count > 0 {
 			fmt.Fprintf(os.Stderr, "wasmforge: relaxed build constraints for %d _windows.go file(s)\n", count)
@@ -1297,6 +1398,180 @@ func rewriteSyscallTypeMismatches(data []byte) []byte {
 	data = bytes.ReplaceAll(data, []byte("syscall.Read(syscall.Handle("), []byte("syscall.Read(int("))
 	data = bytes.ReplaceAll(data, []byte("syscall.Seek(syscall.Handle("), []byte("syscall.Seek(int("))
 	return data
+}
+
+// padPE64UptrFields inserts uint32 padding after each uintptr field in PE64
+// struct definitions (IMAGE_OPTIONAL_HEADER, IMAGE_TLS_DIRECTORY) so the
+// struct size matches the real PE64 binary layout on WASM where uintptr=4.
+// Without padding, the 5 uintptr fields in IMAGE_OPTIONAL_HEADER are 20 bytes
+// short, placing DataDirectory (and everything after) at the wrong offset.
+func padPE64UptrFields(data []byte) []byte {
+	lines := strings.Split(string(data), "\n")
+	var out []string
+	inTargetStruct := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "type IMAGE_OPTIONAL_HEADER struct") ||
+			strings.HasPrefix(trimmed, "type IMAGE_TLS_DIRECTORY struct") ||
+			strings.HasPrefix(trimmed, "type IMAGE_LOAD_CONFIG_DIRECTORY struct") {
+			inTargetStruct = true
+		}
+		out = append(out, line)
+		if inTargetStruct && strings.Contains(trimmed, "uintptr") && !strings.HasPrefix(trimmed, "//") {
+			parts := strings.Fields(trimmed)
+			if len(parts) >= 2 && parts[len(parts)-1] == "uintptr" {
+				fieldName := parts[0]
+				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+				out = append(out, indent+"_wfpad_"+fieldName+" uint32")
+			}
+		}
+		if inTargetStruct && trimmed == "}" {
+			inTargetStruct = false
+		}
+	}
+	return []byte(strings.Join(out, "\n"))
+}
+
+// patchMemmodForWASM applies WASM-specific source patches to memmod package
+// files during the build. This keeps the implant source clean while fixing
+// WASM-incompatible operations. Called after build tag relaxation on the
+// shadow copy.
+//
+// Go GOARCH=wasm has PtrSize=8, so uintptr IS 8 bytes and PE64 struct
+// layouts are already correct. The patches here disable host-only operations
+// (IAT hooking, exception tables, TLS callbacks) and fix the DLL entry
+// point + relocation flow for the shadow memory execution model.
+func patchMemmodForWASM(dir string, verbose bool) error {
+	memmodDir := filepath.Join(dir, "vendor", "github.com", "moloch--", "memmod")
+	if _, err := os.Stat(memmodDir); os.IsNotExist(err) {
+		return nil
+	}
+
+	// Find the main memmod file — after build tag relaxation, memmod_windows.go
+	// gets renamed. Search for the file containing buildImportTable.
+	var mainFile string
+	candidates := []string{"memmod.go", "memmod_wfwin.go", "memmod_windows.go"}
+	for _, name := range candidates {
+		path := filepath.Join(memmodDir, name)
+		if data, err := os.ReadFile(path); err == nil {
+			if bytes.Contains(data, []byte("func (module *Module) buildImportTable()")) {
+				mainFile = path
+				break
+			}
+		}
+	}
+	if mainFile == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(mainFile)
+	if err != nil {
+		return nil
+	}
+
+	original := string(data)
+	patched := original
+
+	// Skip hookRtlPcToFileHeader: walks kernelbase.dll IAT in caller
+	// address space. On WASM, kernelbase is in host memory, not WASM
+	// linear memory — the pointer dereferences would fault.
+	patched = strings.Replace(patched,
+		"func hookRtlPcToFileHeader() error {\n\tvar kernelBase",
+		"func hookRtlPcToFileHeader() error {\n\treturn nil\n\tvar kernelBase",
+		1)
+
+	// Skip registerExceptionHandlers: RtlAddFunctionTable with WASM
+	// addresses is meaningless; the host handles structured exceptions.
+	patched = strings.Replace(patched,
+		"func (module *Module) registerExceptionHandlers() {\n\tdirectory :=",
+		"func (module *Module) registerExceptionHandlers() {\n\treturn\n\tdirectory :=",
+		1)
+
+	// Skip executeTLS: TLS callbacks in extension DLLs are extremely rare
+	// and would require host-side execution infrastructure.
+	patched = strings.Replace(patched,
+		"func (module *Module) executeTLS() {\n\tdirectory := module.headerDirectory(IMAGE_DIRECTORY_ENTRY_TLS)",
+		"func (module *Module) executeTLS() {\n\treturn\n\tdirectory := module.headerDirectory(IMAGE_DIRECTORY_ENTRY_TLS)",
+		1)
+
+	// Relocate against the host allocation, not the WASM shadow address.
+	oldRelocDelta := `	// Adjust base address of imported data.
+	locationDelta := module.headers.OptionalHeader.ImageBase - oldHeader.OptionalHeader.ImageBase
+	if locationDelta != 0 {
+		module.isRelocated, err = module.performBaseRelocation(locationDelta)`
+	newRelocDelta := `	// Adjust base address of imported data.
+		// WASM: use the host allocation for the relocation delta.
+	var _wfHostBase uintptr
+	if _wfShadowHostAddr, _wfErr := windows.ShadowGetHostAddr(module.codeBase); _wfErr == nil {
+		_wfHostBase = _wfShadowHostAddr
+	} else {
+		_wfHostBase = module.codeBase
+	}
+	locationDelta := _wfHostBase - oldHeader.OptionalHeader.ImageBase
+	if locationDelta != 0 {
+		module.isRelocated, err = module.performBaseRelocation(locationDelta)`
+	patched = strings.Replace(patched, oldRelocDelta, newRelocDelta, 1)
+
+	// Store the host base for imageOffset/finalizeSections callers.
+	patched = strings.Replace(patched,
+		"module.headers.OptionalHeader.ImageBase = module.codeBase",
+		"// WASM: store host base so downstream code (imageOffset, etc.) uses the\n\t// address where the DLL actually executes.\n\tif _wfShadowHostAddr, _wfErr := windows.ShadowGetHostAddr(module.codeBase); _wfErr == nil {\n\t\tmodule.headers.OptionalHeader.ImageBase = _wfShadowHostAddr\n\t} else {\n\t\tmodule.headers.OptionalHeader.ImageBase = module.codeBase\n\t}",
+		1)
+
+	// Call DLL entry points through the shadow-memory host trampoline.
+	oldEntry := `	if module.headers.OptionalHeader.AddressOfEntryPoint != 0 {
+		module.entry = module.codeBase + uintptr(module.headers.OptionalHeader.AddressOfEntryPoint)
+		if module.isDLL {
+			// Notify library about attaching to process.
+			r0, _, _ := syscall.Syscall(module.entry, 3, module.codeBase, uintptr(DLL_PROCESS_ATTACH), 0)
+			successful := r0 != 0
+			if !successful {
+				err = windows.ERROR_DLL_INIT_FAILED
+				return
+			}
+			module.initialized = true
+		}
+	}`
+	newEntry := `	if module.headers.OptionalHeader.AddressOfEntryPoint != 0 {
+		module.entry = module.codeBase + uintptr(module.headers.OptionalHeader.AddressOfEntryPoint)
+		if module.isDLL {
+			// WASM: call entry point via shadow host execution.
+			r0, entryErr := windows.ShadowCallEntry(module.codeBase, module.headers.OptionalHeader.AddressOfEntryPoint, DLL_PROCESS_ATTACH)
+			if entryErr != nil {
+				err = fmt.Errorf("DLL entry point call failed: %w", entryErr)
+				return
+			}
+			if r0 == 0 {
+				err = windows.ERROR_DLL_INIT_FAILED
+				return
+			}
+			module.initialized = true
+		}
+	}`
+	patched = strings.Replace(patched, oldEntry, newEntry, 1)
+
+	// Patch Free() DLL_PROCESS_DETACH call similarly.
+	oldDetach := `	if module.initialized {
+		// Notify library about detaching from process.
+		syscall.Syscall(module.entry, 3, module.codeBase, uintptr(DLL_PROCESS_DETACH), 0)
+		module.initialized = false
+	}`
+	newDetach := `	if module.initialized {
+		// WASM: detach via shadow host execution.
+		windows.ShadowCallEntry(module.codeBase, module.headers.OptionalHeader.AddressOfEntryPoint, DLL_PROCESS_DETACH)
+		module.initialized = false
+	}`
+	patched = strings.Replace(patched, oldDetach, newDetach, 1)
+
+	if patched != original {
+		if err := os.WriteFile(mainFile, []byte(patched), 0o644); err != nil {
+			return fmt.Errorf("patching memmod for WASM: %w", err)
+		}
+		if verbose {
+			fmt.Fprintf(os.Stderr, "wasmforge: patched memmod for WASM PE64 compatibility\n")
+		}
+	}
+	return nil
 }
 
 // hasRemainingHandleMismatches checks whether file data still contains
@@ -1608,6 +1883,17 @@ func removeWindowsSuffix(name string) string {
 	return name
 }
 
+// windowsFileArch extracts the GOARCH from a _windows_<arch>.go filename.
+// Returns the arch string (e.g. "amd64", "arm64") or "" if none present.
+func windowsFileArch(name string) string {
+	parts := strings.Split(name, "_")
+	n := len(parts)
+	if n >= 3 && parts[n-2] == "windows" && isKnownGoArch(parts[n-1]) {
+		return parts[n-1]
+	}
+	return ""
+}
+
 // findGoModRoot walks up from dir looking for a go.mod file and returns
 // the directory containing it. Returns "" if no go.mod is found.
 func findGoModRoot(dir string) string {
@@ -1621,6 +1907,18 @@ func findGoModRoot(dir string) string {
 		}
 		dir = parent
 	}
+}
+
+// archBitwidth returns "32" or "64" for a given GOARCH, matching the
+// Go convention for *_32.go / *_64.go bitwidth files.
+func archBitwidth(goarch string) string {
+	switch goarch {
+	case "amd64", "arm64", "mips64", "mips64le", "ppc64", "ppc64le", "riscv64", "s390x", "loong64":
+		return "64"
+	case "386", "arm", "mips", "mipsle":
+		return "32"
+	}
+	return ""
 }
 
 func isKnownGoArch(s string) bool {
@@ -2040,7 +2338,7 @@ func decodeModCachePath(s string) string {
 // For each such package, this function copies the module to a writable
 // location, applies build constraint relaxation (renaming _windows.go so it
 // is selected for wasip1), and injects a replace directive.
-func fixModCachePanicFallbacks(workDir, goBin string, buildEnv []string, tmpDir string, win32APIs, verbose bool) error {
+func fixModCachePanicFallbacks(workDir, goBin string, buildEnv []string, tmpDir string, win32APIs, verbose bool, targetGOARCH string) error {
 	// Use go list -deps to discover all dependency package directories.
 	cmd := exec.Command(goBin, "list", "-deps", "-e", "-f", "{{.Dir}}", "./...")
 	cmd.Dir = workDir
@@ -2111,7 +2409,7 @@ func fixModCachePanicFallbacks(workDir, goBin string, buildEnv []string, tmpDir 
 		if win32APIs {
 			// With Win32 APIs: apply build constraint relaxation so the
 			// Windows implementation is used (compiles with sysshim).
-			if _, _, err := relaxWindowsBuildConstraints(modCopyDir, verbose); err != nil {
+			if _, _, err := relaxWindowsBuildConstraints(modCopyDir, verbose, targetGOARCH); err != nil {
 				if verbose {
 					fmt.Fprintf(os.Stderr, "wasmforge: modcache fix: relax constraints for %s: %v\n", modPath, err)
 				}

