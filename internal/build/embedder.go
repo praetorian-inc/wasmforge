@@ -19,8 +19,9 @@ type HostConfig struct {
 	RawSockets bool
 	Win32APIs  bool
 	DarwinAPIs bool
-	NativeAOT  bool // Include NativeAOT-specific host functions (WMI, SDDL, LSA, RPC, WASI P2).
-	FSMounts   []string
+	NativeAOT   bool // Include NativeAOT-specific host functions (WMI, SDDL, LSA, RPC, WASI P2).
+	NoAMSIPatch bool
+	FSMounts    []string
 	PE         PEMetadata
 	// Ghost is the name of the ghost profile to use for gopclntab camouflage.
 	// Empty string means "auto" (random embedded profile if available).

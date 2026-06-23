@@ -31,6 +31,10 @@ type Config struct {
 	// DarwinAPIs enables Darwin/macOS framework host functions.
 	DarwinAPIs bool
 
+	// NoAMSIPatch disables the AMSI patch. Use for Go payloads that don't
+	// need CLR Assembly.Load and want to avoid behavioral AMSI-bypass alerts.
+	NoAMSIPatch bool
+
 	// FSMounts lists host directories to mount into the WASM filesystem.
 	// Format: "hostpath:guestpath" or just "hostpath" (mounted at same path).
 	FSMounts []string

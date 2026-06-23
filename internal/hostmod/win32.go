@@ -49,6 +49,8 @@ import (
 //	win32_hmem_read32          (i32,i32,i32) → i32
 //	win32_hmem_read64          (i32,i32,i32) → i32
 //	win32_hmem_addr            (i32,i32) → i32
+//	shadow_host_addr           (i32,i32) → i32
+//	shadow_call_entry          (i32,i32,i32,i32) → i32
 func registerWin32Functions(b wazero.HostModuleBuilder) wazero.HostModuleBuilder {
 	return b.
 		// win32_available: () → i32
@@ -572,5 +574,27 @@ func registerWin32Functions(b wazero.HostModuleBuilder) wazero.HostModuleBuilder
 			stack[0] = uint64(shadowVirtualFree(ctx, mod, wasmAddr, size, freeType))
 		}), []api.ValueType{api.ValueTypeI32, api.ValueTypeI32, api.ValueTypeI32}, []api.ValueType{api.ValueTypeI32}).
 		WithParameterNames("wasm_addr", "size", "free_type").
-		Export(export("shadow_virtual_free"))
+		Export(export("shadow_virtual_free")).
+
+		// shadow_host_addr: wasm_addr, addr_ptr → errno
+		NewFunctionBuilder().
+		WithGoModuleFunction(api.GoModuleFunc(func(ctx context.Context, mod api.Module, stack []uint64) {
+			wasmAddr := uint32(stack[0])
+			addrPtr := uint32(stack[1])
+			stack[0] = uint64(shadowGetHostAddr(ctx, mod, wasmAddr, addrPtr))
+		}), []api.ValueType{api.ValueTypeI32, api.ValueTypeI32}, []api.ValueType{api.ValueTypeI32}).
+		WithParameterNames("wasm_addr", "addr_ptr").
+		Export(export("shadow_host_addr")).
+
+		// shadow_call_entry: wasm_addr, entry_offset, fdw_reason, result_ptr → errno
+		NewFunctionBuilder().
+		WithGoModuleFunction(api.GoModuleFunc(func(ctx context.Context, mod api.Module, stack []uint64) {
+			wasmAddr := uint32(stack[0])
+			entryOffset := uint32(stack[1])
+			fdwReason := uint32(stack[2])
+			resultPtr := uint32(stack[3])
+			stack[0] = uint64(shadowCallEntry(ctx, mod, wasmAddr, entryOffset, fdwReason, resultPtr))
+		}), []api.ValueType{api.ValueTypeI32, api.ValueTypeI32, api.ValueTypeI32, api.ValueTypeI32}, []api.ValueType{api.ValueTypeI32}).
+		WithParameterNames("wasm_addr", "entry_offset", "fdw_reason", "result_ptr").
+		Export(export("shadow_call_entry"))
 }

@@ -41,6 +41,7 @@ network I/O.`,
 		peCopyright     string
 		peFileVersion   string
 		precompiledWASM string
+		noAMSIPatch     bool
 	)
 
 	buildCmd := &cobra.Command{
@@ -66,6 +67,7 @@ network I/O.`,
 				NoSign:          noSign,
 				BuildTags:       buildTags,
 				Ghost:           ghost,
+				NoAMSIPatch:     noAMSIPatch,
 				// NativeAOT is auto-set inside build.Run() when --wasm or a C# project is detected.
 				PrecompiledWASM: precompiledWASM,
 				MigrateFunc: func(sourceDir string, v bool) error {
@@ -108,6 +110,7 @@ network I/O.`,
 	buildCmd.Flags().StringVar(&buildTags, "tags", "", "Extra Go build tags (comma-separated, e.g. 'shell,ps,netstat')")
 	buildCmd.Flags().StringVar(&ghost, "ghost", "", "Ghost profile name for gopclntab camouflage (e.g., 'traefik', 'caddy')")
 	buildCmd.Flags().StringVar(&precompiledWASM, "wasm", "", "Use precompiled WASM file instead of compiling Go source")
+	buildCmd.Flags().BoolVar(&noAMSIPatch, "no-amsi-patch", false, "Skip AMSI patching at runtime (use for Go payloads to avoid behavioral AMSI-bypass detections)")
 
 	runCmd := &cobra.Command{
 		Use:   "run [package]",

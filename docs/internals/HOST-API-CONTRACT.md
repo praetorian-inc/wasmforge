@@ -218,6 +218,8 @@ tests, but kept for the broader product surface.
 | shadow_virtual_alloc | shm_alloc | A | Shadow VirtualAlloc — intercepts guest allocations for WASM pointer translation |
 | shadow_virtual_protect | shm_protect | A | Shadow VirtualProtect — tracks protection changes in shadow map |
 | shadow_virtual_free | shm_free | A | Shadow VirtualFree — removes allocation from shadow map |
+| shadow_host_addr | shm_host_addr | A | Return the real host VA for a WASM shadow allocation |
+| shadow_call_entry | shm_call_entry | A | Sync a shadow allocation and call its host entry point |
 
 ---
 

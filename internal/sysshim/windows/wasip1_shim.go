@@ -21,8 +21,6 @@ package windows
 import (
 	"encoding/binary"
 	"reflect"
-	"runtime"
-	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -277,6 +275,9 @@ type extPrintfFunc = func(int, uintptr, uintptr, uintptr, uintptr, uintptr, uint
 
 var extPrintfCallback extPrintfFunc
 
+// extExtensionCallback stores the Sliver extension callback.
+var extExtensionCallback func(uintptr, uintptr) uintptr
+
 func init() {
 	syscall.AfterSyscallNHook = drainExtensionOutput
 }
@@ -289,9 +290,12 @@ func drainExtensionOutput(trap uintptr) {
 	extOutputMu.Lock()
 	outputCB := extOutputCallback
 	printfCB := extPrintfCallback
+	extCB := extExtensionCallback
 	extOutputMu.Unlock()
 
-	if outputCB == nil && printfCB == nil {
+	syscallExtCB := syscall.ExtensionCallbackFn
+
+	if outputCB == nil && printfCB == nil && extCB == nil && syscallExtCB == nil {
 		return
 	}
 
@@ -314,16 +318,16 @@ func drainExtensionOutput(trap uintptr) {
 		return
 	}
 
-	// Route data through the guest callback to goffloader's channel.
 	if outputCB != nil {
-		// Output callback: pass raw data pointer + length.
 		outputCB(0, uintptr(unsafe.Pointer(&buf[0])), int(actualLen))
+	} else if syscallExtCB != nil {
+		syscallExtCB(uintptr(unsafe.Pointer(&buf[0])), uintptr(actualLen))
+	} else if extCB != nil {
+		extCB(uintptr(unsafe.Pointer(&buf[0])), uintptr(actualLen))
 	} else if printfCB != nil {
-		// Printf callback: pass "%s" format + null-terminated data as arg0.
 		fmtStr := [3]byte{'%', 's', 0}
 		dataBuf := make([]byte, actualLen+1)
 		copy(dataBuf, buf)
-		// dataBuf[actualLen] is already 0 (null terminator)
 		printfCB(0, uintptr(unsafe.Pointer(&fmtStr[0])), uintptr(unsafe.Pointer(&dataBuf[0])), 0, 0, 0, 0, 0, 0, 0, 0, 0)
 	}
 
@@ -341,32 +345,53 @@ func win32_new_callback(namePtr *byte, nameLen int32, addrPtr *byte) int32
 // to the stdcall calling convention.
 //
 // On wasip1, WASM cannot create native function pointers directly. Instead,
-// this uses the function's name (via runtime.FuncForPC) as a hint to the host,
-// which maps it to a pre-created Extension API callback. This supports Beacon
-// API callbacks (Output, Printf, DataParse, etc.) used by COFF/BOF loaders.
+// this uses the function signature as a hint to the host, which maps it to a
+// pre-created Extension API callback. This supports Beacon API callbacks
+// (Output, Printf, DataParse, etc.) used by COFF/BOF loaders.
 func NewCallback(fn interface{}) uintptr {
-	// Get the function name to use as a hint for the host.
-	name := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
-	nameBytes := []byte(name)
+	fnType := reflect.TypeOf(fn)
+	var hint string
+	uptrType := reflect.TypeOf(uintptr(0))
+	intType := reflect.TypeOf(int(0))
 
-	// Store output-producing callbacks for post-SyscallN drain. When the host's
-	// native BOF calls Output/Printf, data goes to the host buffer. After
-	// SyscallN returns, drainExtensionOutput reads that buffer and routes
-	// it through the stored callback to the guest's channel.
-	if strings.Contains(name, "Output") {
-		if cb, ok := fn.(func(int, uintptr, int) uintptr); ok {
+	if fnType != nil && fnType.Kind() == reflect.Func && fnType.NumOut() == 1 && fnType.Out(0) == uptrType {
+		numIn := fnType.NumIn()
+		if numIn == 3 && fnType.In(0) == intType && fnType.In(1) == uptrType && fnType.In(2) == intType {
+			hint = "Output"
+			v := reflect.ValueOf(fn)
 			extOutputMu.Lock()
-			extOutputCallback = cb
+			extOutputCallback = func(a int, b uintptr, c int) uintptr {
+				r := v.Call([]reflect.Value{reflect.ValueOf(a), reflect.ValueOf(b), reflect.ValueOf(c)})
+				return r[0].Interface().(uintptr)
+			}
 			extOutputMu.Unlock()
-		}
-	} else if strings.Contains(name, "Printf") {
-		if cb, ok := fn.(extPrintfFunc); ok {
+		} else if isPrintfCallbackType(fnType, intType, uptrType) {
+			hint = "Printf"
+			v := reflect.ValueOf(fn)
 			extOutputMu.Lock()
-			extPrintfCallback = cb
+			extPrintfCallback = func(a0 int, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11 uintptr) uintptr {
+				r := v.Call([]reflect.Value{
+					reflect.ValueOf(a0),
+					reflect.ValueOf(a1), reflect.ValueOf(a2), reflect.ValueOf(a3), reflect.ValueOf(a4),
+					reflect.ValueOf(a5), reflect.ValueOf(a6), reflect.ValueOf(a7), reflect.ValueOf(a8),
+					reflect.ValueOf(a9), reflect.ValueOf(a10), reflect.ValueOf(a11),
+				})
+				return r[0].Interface().(uintptr)
+			}
+			extOutputMu.Unlock()
+		} else if numIn == 2 && fnType.In(0) == uptrType && fnType.In(1) == uptrType {
+			hint = "extensionCallback"
+			v := reflect.ValueOf(fn)
+			extOutputMu.Lock()
+			extExtensionCallback = func(data uintptr, length uintptr) uintptr {
+				r := v.Call([]reflect.Value{reflect.ValueOf(data), reflect.ValueOf(length)})
+				return r[0].Interface().(uintptr)
+			}
 			extOutputMu.Unlock()
 		}
 	}
 
+	nameBytes := []byte(hint)
 	var addrBuf [8]byte
 	var namePtr *byte
 	if len(nameBytes) > 0 {
@@ -377,6 +402,18 @@ func NewCallback(fn interface{}) uintptr {
 		return 0
 	}
 	return uintptr(binary.LittleEndian.Uint64(addrBuf[:]))
+}
+
+func isPrintfCallbackType(fnType reflect.Type, intType, uptrType reflect.Type) bool {
+	if fnType.NumIn() != 12 || fnType.In(0) != intType || fnType.In(1) != uptrType {
+		return false
+	}
+	for i := 2; i < fnType.NumIn(); i++ {
+		if fnType.In(i) != uptrType {
+			return false
+		}
+	}
+	return true
 }
 
 // NewCallbackCDecl converts a Go function to a function pointer conforming
