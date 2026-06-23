@@ -19,9 +19,8 @@ import (
 //   - bitwidth-suffixed Windows files (_windows_64.go) get the
 //     build tag relaxed so their PE64 types reach the WASM compile
 //   - memmod's three host-only entry points get short-circuited
-//   - the relocation delta and DLL entry/detach paths are bridged
-//     through ShadowGetHostAddr / ShadowCallEntry (the actual fix
-//     for the shadow-memory model)
+//   - the relocation delta uses the host memory address, and DLL
+//     entry/detach calls route through the shadow-aware syscall path
 //   - patchMemmodForWASM does NOT inject struct padding (catches
 //     any future re-wiring of padPE64UptrFields, which was the
 //     original wrong-headed fix)
@@ -189,7 +188,7 @@ func TestPatchMemmodForWASM_StubsHostOnlyFunctions(t *testing.T) {
 
 // TestPatchMemmodForWASM_BridgesRelocationThroughShadowHost asserts the
 // performBaseRelocation path is rewritten to compute the relocation
-// delta from the *host* base address (ShadowGetHostAddr), not the WASM
+// delta from the *host* base address (HostMemoryAddress), not the WASM
 // linear-memory base. This is the actual fix for the regression — the
 // DLL code executes in host shadow memory after VirtualAlloc, so
 // using module.codeBase (a WASM address) for the delta produces
@@ -202,8 +201,11 @@ func TestPatchMemmodForWASM_BridgesRelocationThroughShadowHost(t *testing.T) {
 	}
 
 	out := readFile(t, mainFile)
-	if !strings.Contains(out, "windows.ShadowGetHostAddr(module.codeBase)") {
-		t.Errorf("expected windows.ShadowGetHostAddr bridge in patched memmod, got:\n%s", out)
+	if !strings.Contains(out, "windows.HostMemoryAddress(module.codeBase)") {
+		t.Errorf("expected windows.HostMemoryAddress bridge in patched memmod, got:\n%s", out)
+	}
+	if strings.Contains(out, "windows.ShadowGetHostAddr") {
+		t.Errorf("patched memmod should not require shadow_host_addr export:\n%s", out)
 	}
 	// The original WASM-broken expression must be gone.
 	if strings.Contains(out, "locationDelta := module.headers.OptionalHeader.ImageBase - oldHeader.OptionalHeader.ImageBase\n\tif locationDelta != 0") {
@@ -211,14 +213,12 @@ func TestPatchMemmodForWASM_BridgesRelocationThroughShadowHost(t *testing.T) {
 	}
 }
 
-// TestPatchMemmodForWASM_BridgesDLLEntryThroughShadowCallEntry asserts
-// the DLL entry point and detach calls go through ShadowCallEntry,
-// which syncs WASM→Host memory, sets PAGE_EXECUTE_READWRITE, flushes
-// the instruction cache, and calls at the correct host address. The
-// original syscall.Syscall path passes a raw address as a proc handle,
-// which the win32_syscalln dispatcher treats as an int32 handle ID
-// and rejects.
-func TestPatchMemmodForWASM_BridgesDLLEntryThroughShadowCallEntry(t *testing.T) {
+// TestPatchMemmodForWASM_BridgesDLLEntryThroughShadowSyscall asserts
+// the DLL entry point and detach calls go through syscall.Syscall. On WASM,
+// syscall.Syscall routes to mod_invoke, whose host dispatcher recognizes
+// shadow entry-point addresses and executes them in host memory without
+// requiring a dedicated shadow_call_entry export.
+func TestPatchMemmodForWASM_BridgesDLLEntryThroughShadowSyscall(t *testing.T) {
 	dir, mainFile := setupMemmodFixture(t, memmodFixture)
 
 	if err := patchMemmodForWASM(dir, false); err != nil {
@@ -227,17 +227,15 @@ func TestPatchMemmodForWASM_BridgesDLLEntryThroughShadowCallEntry(t *testing.T) 
 
 	out := readFile(t, mainFile)
 	// Attach path.
-	if !strings.Contains(out, "windows.ShadowCallEntry(module.codeBase, module.headers.OptionalHeader.AddressOfEntryPoint, DLL_PROCESS_ATTACH)") {
-		t.Errorf("expected ShadowCallEntry(..., DLL_PROCESS_ATTACH) in patched memmod, got:\n%s", out)
+	if !strings.Contains(out, "syscall.Syscall(module.entry, 3, module.codeBase, uintptr(DLL_PROCESS_ATTACH), 0)") {
+		t.Errorf("expected syscall trampoline attach in patched memmod, got:\n%s", out)
 	}
 	// Detach path.
-	if !strings.Contains(out, "windows.ShadowCallEntry(module.codeBase, module.headers.OptionalHeader.AddressOfEntryPoint, DLL_PROCESS_DETACH)") {
-		t.Errorf("expected ShadowCallEntry(..., DLL_PROCESS_DETACH) in patched memmod, got:\n%s", out)
+	if !strings.Contains(out, "syscall.Syscall(module.entry, 3, module.codeBase, uintptr(DLL_PROCESS_DETACH), 0)") {
+		t.Errorf("expected syscall trampoline detach in patched memmod, got:\n%s", out)
 	}
-	// Original WASM-broken syscall.Syscall(module.entry,...) must be gone
-	// from the attach call site.
-	if strings.Contains(out, "syscall.Syscall(module.entry, 3, module.codeBase, uintptr(DLL_PROCESS_ATTACH), 0)") {
-		t.Errorf("unpatched syscall.Syscall ATTACH call still present — entry-point bridge not wired in")
+	if strings.Contains(out, "windows.ShadowCallEntry") {
+		t.Errorf("patched memmod should not require shadow_call_entry export:\n%s", out)
 	}
 }
 

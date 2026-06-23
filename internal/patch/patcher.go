@@ -3,6 +3,7 @@
 package patch
 
 import (
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"os"
@@ -89,6 +90,28 @@ func Patches() []Patch {
 			Condition:  "win32",
 		},
 	}
+}
+
+// Fingerprint returns a stable digest of the embedded replacement files that
+// apply for opts. Build caches include this so stdlib shim edits invalidate
+// stale patched GOROOT directories.
+func Fingerprint(opts PatchOptions) (string, error) {
+	h := sha256.New()
+	fmt.Fprintf(h, "win32=%t\n", opts.Win32APIs)
+
+	for _, p := range Patches() {
+		if p.Condition == "win32" && !opts.Win32APIs {
+			continue
+		}
+		content, err := patchFiles.ReadFile("files/" + p.EmbedName)
+		if err != nil {
+			return "", fmt.Errorf("reading embedded patch %s: %w", p.EmbedName, err)
+		}
+		fmt.Fprintf(h, "%s\x00%s\x00%s\n", p.EmbedName, p.TargetPath, p.Condition)
+		h.Write(content)
+	}
+
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
 // Apply copies the embedded replacement files over the originals

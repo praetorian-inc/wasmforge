@@ -336,20 +336,37 @@ func win32HMemAddr(ctx context.Context, mod api.Module, handle int32, addrPtr ui
 	if cfg == nil || !cfg.Win32APIs {
 		return errnoENOSYS
 	}
+
 	ht := getWin32Handles(ctx)
+	if ht != nil {
+		entry := ht.get(handle)
+		if entry != nil && entry.kind == handleHostMem {
+			var buf [8]byte
+			binary.LittleEndian.PutUint64(buf[:], uint64(entry.winHandle))
+			if !writeBytes(mod, addrPtr, buf[:]) {
+				return errnoEFAULT
+			}
+			return errnoSuccess
+		}
+	}
+
+	if sm := getShadowMap(ctx); sm != nil {
+		wasmAddr := uint32(handle)
+		if entry := sm.LookupContaining(wasmAddr); entry != nil {
+			offset := uintptr(wasmAddr - entry.wasmAddr)
+			hostAddr := entry.hostAddr + offset
+
+			var buf [8]byte
+			binary.LittleEndian.PutUint64(buf[:], uint64(hostAddr))
+			if !writeBytes(mod, addrPtr, buf[:]) {
+				return errnoEFAULT
+			}
+			return errnoSuccess
+		}
+	}
+
 	if ht == nil {
 		return errnoEINVAL
 	}
-
-	entry := ht.get(handle)
-	if entry == nil || entry.kind != handleHostMem {
-		return errnoEBADF
-	}
-
-	var buf [8]byte
-	binary.LittleEndian.PutUint64(buf[:], uint64(entry.winHandle))
-	if !writeBytes(mod, addrPtr, buf[:]) {
-		return errnoEFAULT
-	}
-	return errnoSuccess
+	return errnoEBADF
 }

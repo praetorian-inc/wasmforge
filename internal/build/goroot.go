@@ -28,7 +28,12 @@ func PatchedGOROOT(verbose bool, win32APIs bool) (string, error) {
 		return "", err
 	}
 
-	cacheDir, err := cacheDir(goVersion, win32APIs)
+	patchKey, err := patch.Fingerprint(patch.PatchOptions{Win32APIs: win32APIs})
+	if err != nil {
+		return "", fmt.Errorf("computing patch fingerprint: %w", err)
+	}
+
+	cacheDir, err := cacheDir(goVersion, win32APIs, patchKey)
 	if err != nil {
 		return "", err
 	}
@@ -158,7 +163,7 @@ func detectGoVersion() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func cacheDir(goVersion string, win32APIs bool) (string, error) {
+func cacheDir(goVersion string, win32APIs bool, patchKey string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("getting home dir: %w", err)
@@ -168,7 +173,7 @@ func cacheDir(goVersion string, win32APIs bool) (string, error) {
 	if win32APIs {
 		win32Flag = "1"
 	}
-	hash := sha256.Sum256([]byte(goVersion + "|" + version + "|win32=" + win32Flag))
+	hash := sha256.Sum256([]byte(goVersion + "|" + version + "|win32=" + win32Flag + "|patch=" + patchKey))
 	key := fmt.Sprintf("%x", hash[:8])
 
 	return filepath.Join(home, ".wasmforge", "cache", key), nil

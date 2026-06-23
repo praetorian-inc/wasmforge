@@ -516,21 +516,21 @@ type comWorkerRequest struct {
 // These are dispatched to background goroutines instead of the COM worker
 // to avoid freezing all WASM guest goroutines.
 var blockingAPIs = map[string]bool{
-	"WaitForSingleObject":          true,
-	"WaitForSingleObjectEx":        true,
-	"WaitForMultipleObjects":       true,
-	"WaitForMultipleObjectsEx":     true,
-	"Sleep":                        true,
-	"SleepEx":                      true,
-	"ReadFile":                     true,
-	"WriteFile":                    true,
-	"WaitNamedPipeW":               true,
-	"ConnectNamedPipe":             true,
-	"GetQueuedCompletionStatus":    true,
-	"MsgWaitForMultipleObjects":    true,
-	"MsgWaitForMultipleObjectsEx":  true,
-	"SignalObjectAndWait":          true,
-	"GetExitCodeThread":            true,
+	"WaitForSingleObject":         true,
+	"WaitForSingleObjectEx":       true,
+	"WaitForMultipleObjects":      true,
+	"WaitForMultipleObjectsEx":    true,
+	"Sleep":                       true,
+	"SleepEx":                     true,
+	"ReadFile":                    true,
+	"WriteFile":                   true,
+	"WaitNamedPipeW":              true,
+	"ConnectNamedPipe":            true,
+	"GetQueuedCompletionStatus":   true,
+	"MsgWaitForMultipleObjects":   true,
+	"MsgWaitForMultipleObjectsEx": true,
+	"SignalObjectAndWait":         true,
+	"GetExitCodeThread":           true,
 }
 
 // pendingAsyncState tracks a single in-flight async Win32 call.
@@ -545,8 +545,8 @@ var blockingAPIs = map[string]bool{
 // a different stack address.
 type pendingAsyncState struct {
 	mu    sync.Mutex
-	owner uint32        // ret1Ptr of the owning goroutine (0 = no pending)
-	done  bool          // true when background goroutine has finished
+	owner uint32 // ret1Ptr of the owning goroutine (0 = no pending)
+	done  bool   // true when background goroutine has finished
 	r1    uintptr
 	r2    uintptr
 	err   syscall.Errno
@@ -559,7 +559,7 @@ var comWorker struct {
 	once        sync.Once
 	reqChan     chan *comWorkerRequest // Requests sent to the worker
 	ready       chan struct{}          // Closed when worker is initialized
-	vehCallback uintptr               // VEH callback pointer (prevent GC)
+	vehCallback uintptr                // VEH callback pointer (prevent GC)
 }
 
 // comWorkerInit starts the persistent COM worker goroutine. Uses a Go goroutine
@@ -663,14 +663,14 @@ func comVectoredExceptionHandler(exceptionInfo uintptr) uintptr {
 		contextRecord   uintptr
 	}
 	type exceptionRecord struct {
-		code       uint32
-		flags      uint32
-		record     uintptr
-		address    uintptr
-		numParams  uint32
-		_pad       uint32
-		info0      uintptr // Read(0)/Write(1)/DEP(8)
-		info1      uintptr // Faulting virtual address
+		code      uint32
+		flags     uint32
+		record    uintptr
+		address   uintptr
+		numParams uint32
+		_pad      uint32
+		info0     uintptr // Read(0)/Write(1)/DEP(8)
+		info1     uintptr // Faulting virtual address
 	}
 
 	ptrs := (*exceptionPointers)(unsafe.Pointer(exceptionInfo))
@@ -1157,19 +1157,19 @@ func win32SyscallN(ctx context.Context, mod api.Module, proc int32, nargs int32,
 						continue
 					}
 					args[i] = wasmMemBase + uintptr(wasmVal)
-				// Buffer-size heuristic: if arg[i+1] looks like a buffer
-				// size rather than a pointer, don't translate it. We check:
-				// 1. arg[i] + arg[i+1] fits within WASM memory (size of buffer)
-				// 2. arg[i+1] < 16MB (no legitimate size arg is that large,
-				//    but WASM heap pointers in Go programs are typically > 16MB)
-				const maxSizeArg = 0x100000 // 1MB — legitimate buffer sizes rarely exceed this
-				if i+1 < nargs {
-					nextVal := uint32(args[i+1])
-					if nextVal >= wasmPtrThreshold && nextVal < maxSizeArg &&
-						uint64(wasmVal)+uint64(nextVal) <= uint64(wasmMemSize) {
-						sizeOf[i+1] = true
+					// Buffer-size heuristic: if arg[i+1] looks like a buffer
+					// size rather than a pointer, don't translate it. We check:
+					// 1. arg[i] + arg[i+1] fits within WASM memory (size of buffer)
+					// 2. arg[i+1] < 16MB (no legitimate size arg is that large,
+					//    but WASM heap pointers in Go programs are typically > 16MB)
+					const maxSizeArg = 0x100000 // 1MB — legitimate buffer sizes rarely exceed this
+					if i+1 < nargs {
+						nextVal := uint32(args[i+1])
+						if nextVal >= wasmPtrThreshold && nextVal < maxSizeArg &&
+							uint64(wasmVal)+uint64(nextVal) <= uint64(wasmMemSize) {
+							sizeOf[i+1] = true
+						}
 					}
-				}
 				}
 			}
 		} // end else (heuristic mode)
@@ -1191,8 +1191,8 @@ func win32SyscallN(ctx context.Context, mod api.Module, proc int32, nargs int32,
 	// pointed-to host buffer for 4-byte values matching known mirror entries.
 	// Replace each match with the 8-byte host address. Restore after the call.
 	type deepMirrorPatch struct {
-		hostAddr uintptr  // Host buffer address where we patched
-		original [8]byte  // Original 8 bytes to restore
+		hostAddr uintptr // Host buffer address where we patched
+		original [8]byte // Original 8 bytes to restore
 	}
 	var deepMirrorPatches []deepMirrorPatch
 
@@ -1871,40 +1871,40 @@ postCall:
 						if len(mirrorData) < 32 {
 							mirrorDebugLog("Step7: SAFEARRAY too small for pvData")
 						} else {
-						pvData := le64(mirrorData[16:24])
-						mirrorDebugLog("Step7: SAFEARRAY pvData=0x%x", pvData)
-						pvDataInWasm := pvData >= uint64(wasmMemBase) && pvData < uint64(wasmMemBase)+uint64(wasmMemSize)
-					if !pvDataInWasm && pvData > 0x10000 && pvData < 0x7FFFFFFFFFFF {
-							hostPvData := uintptr(pvData)
-							if mirrorShouldMirror(hostPvData) {
-								// Mirror the data area. Size = cbElements * rgsabound[0].cElements
-								// rgsabound at offset 24: cElements(4) + lLbound(4)
-								var cElements uint32
-								if len(mirrorData) >= 32 {
-									cElements = uint32(mirrorData[24]) | uint32(mirrorData[25])<<8 |
-										uint32(mirrorData[26])<<16 | uint32(mirrorData[27])<<24
-								}
-								dataSize := cbElements * cElements
-								if dataSize == 0 {
-									dataSize = 4096
-								}
-								// No size cap — .NET assemblies can be hundreds of KB.
-								// Seatbelt.exe = 597KB, Rubeus.exe = 463KB.
-								mirrorDebugLog("Step7: SAFEARRAY pvData mirror size=%d (cbElements=%d cElements=%d)", dataSize, cbElements, cElements)
-								pvDataMirror := mt.MirrorWritable(mod, hostPvData, dataSize)
-								if pvDataMirror != 0 {
-									mirrorDebugLog("Step7: SAFEARRAY pvData host=0x%x -> wasm=0x%x size=%d",
-										hostPvData, pvDataMirror, dataSize)
-									// Replace pvData in the mirrored SAFEARRAY.
-									putLE64(mirrorData[16:24], uint64(pvDataMirror))
-									writeBytes(mod, mirrorAddr, mirrorData)
+							pvData := le64(mirrorData[16:24])
+							mirrorDebugLog("Step7: SAFEARRAY pvData=0x%x", pvData)
+							pvDataInWasm := pvData >= uint64(wasmMemBase) && pvData < uint64(wasmMemBase)+uint64(wasmMemSize)
+							if !pvDataInWasm && pvData > 0x10000 && pvData < 0x7FFFFFFFFFFF {
+								hostPvData := uintptr(pvData)
+								if mirrorShouldMirror(hostPvData) {
+									// Mirror the data area. Size = cbElements * rgsabound[0].cElements
+									// rgsabound at offset 24: cElements(4) + lLbound(4)
+									var cElements uint32
+									if len(mirrorData) >= 32 {
+										cElements = uint32(mirrorData[24]) | uint32(mirrorData[25])<<8 |
+											uint32(mirrorData[26])<<16 | uint32(mirrorData[27])<<24
+									}
+									dataSize := cbElements * cElements
+									if dataSize == 0 {
+										dataSize = 4096
+									}
+									// No size cap — .NET assemblies can be hundreds of KB.
+									// Seatbelt.exe = 597KB, Rubeus.exe = 463KB.
+									mirrorDebugLog("Step7: SAFEARRAY pvData mirror size=%d (cbElements=%d cElements=%d)", dataSize, cbElements, cElements)
+									pvDataMirror := mt.MirrorWritable(mod, hostPvData, dataSize)
+									if pvDataMirror != 0 {
+										mirrorDebugLog("Step7: SAFEARRAY pvData host=0x%x -> wasm=0x%x size=%d",
+											hostPvData, pvDataMirror, dataSize)
+										// Replace pvData in the mirrored SAFEARRAY.
+										putLE64(mirrorData[16:24], uint64(pvDataMirror))
+										writeBytes(mod, mirrorAddr, mirrorData)
+									}
+								} else {
+									mirrorDebugLog("Step7: SAFEARRAY pvData mirrorShouldMirror REJECTED 0x%x", hostPvData)
 								}
 							} else {
-								mirrorDebugLog("Step7: SAFEARRAY pvData mirrorShouldMirror REJECTED 0x%x", hostPvData)
+								mirrorDebugLog("Step7: SAFEARRAY pvData=0x%x outside range (wasmMemSize=0x%x)", pvData, wasmMemSize)
 							}
-						} else {
-							mirrorDebugLog("Step7: SAFEARRAY pvData=0x%x outside range (wasmMemSize=0x%x)", pvData, wasmMemSize)
-						}
 						} // end else (len >= 32)
 					}
 				} else {
@@ -2224,6 +2224,10 @@ func interceptVirtualFree(mod api.Module, sm *shadowMap, nargs int32, args []uin
 //  4. Executes the native code at the host entry point
 //  5. Post-syncs ALL shadow regions from Host → WASM
 func execShadowEntryPoint(mod api.Module, sm *shadowMap, ht *win32HandleTable, hostEntryPoint uintptr, nargs int32, args []uintptr, ret1Ptr, ret2Ptr, lastErrPtr uint32) uint32 {
+	if entry := shadowEntryForPEEntrypoint(sm, hostEntryPoint, nargs, args); entry != nil {
+		return execShadowPEEntrypoint(mod, entry, hostEntryPoint, args, ret1Ptr, ret2Ptr, lastErrPtr)
+	}
+
 	entries := sm.GetAll()
 
 	// Pre-sync: copy ALL shadow regions from WASM → Host.
@@ -2240,6 +2244,7 @@ func execShadowEntryPoint(mod api.Module, sm *shadowMap, ht *win32HandleTable, h
 		if ok {
 			hostSlice := unsafeSlice(e.hostAddr, e.size)
 			copy(hostSlice, wasmData)
+			flushInstructionCache(e.hostAddr, uintptr(e.size))
 		}
 
 		// Restore the actual protection.
@@ -2336,5 +2341,38 @@ func execShadowEntryPoint(mod api.Module, sm *shadowMap, ht *win32HandleTable, h
 		writeBytes(mod, e.wasmAddr, hostData)
 	}
 
+	return writeReturnValues(mod, ret1Ptr, ret2Ptr, lastErrPtr, r1, r2, uintptr(err))
+}
+
+func shadowEntryForPEEntrypoint(sm *shadowMap, hostEntryPoint uintptr, nargs int32, args []uintptr) *shadowEntry {
+	if sm == nil || nargs != 3 || len(args) < 3 {
+		return nil
+	}
+	for _, entry := range sm.GetAll() {
+		if hostEntryPoint < entry.hostAddr || hostEntryPoint >= entry.hostAddr+uintptr(entry.size) {
+			continue
+		}
+		if uint32(args[0]) == entry.wasmAddr {
+			return &entry
+		}
+	}
+	return nil
+}
+
+func execShadowPEEntrypoint(mod api.Module, entry *shadowEntry, hostEntryPoint uintptr, args []uintptr, ret1Ptr, ret2Ptr, lastErrPtr uint32) uint32 {
+	var oldProtect uint32
+	if err := windows.VirtualProtect(entry.hostAddr, uintptr(entry.size), windows.PAGE_EXECUTE_READWRITE, &oldProtect); err != nil {
+		return writeReturnValues(mod, ret1Ptr, ret2Ptr, lastErrPtr, 0, 0, uintptr(win32Errno(err)))
+	}
+
+	wasmData, ok := readBytes(mod, entry.wasmAddr, entry.size)
+	if !ok {
+		return errnoEFAULT
+	}
+	hostSlice := unsafeSlice(entry.hostAddr, entry.size)
+	copy(hostSlice, wasmData)
+	flushInstructionCache(entry.hostAddr, uintptr(entry.size))
+
+	r1, r2, err := syscall.SyscallN(hostEntryPoint, entry.hostAddr, args[1], args[2])
 	return writeReturnValues(mod, ret1Ptr, ret2Ptr, lastErrPtr, r1, r2, uintptr(err))
 }

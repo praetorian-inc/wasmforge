@@ -22,13 +22,3 @@ func shadowVirtualProtect(ctx context.Context, mod api.Module, wasmAddr, size, n
 func shadowVirtualFree(ctx context.Context, mod api.Module, wasmAddr, size, freeType uint32) uint32 {
 	return errnoENOSYS
 }
-
-// shadowGetHostAddr always returns errnoENOSYS on non-Windows platforms.
-func shadowGetHostAddr(ctx context.Context, mod api.Module, wasmAddr, addrPtr uint32) uint32 {
-	return errnoENOSYS
-}
-
-// shadowCallEntry always returns errnoENOSYS on non-Windows platforms.
-func shadowCallEntry(ctx context.Context, mod api.Module, wasmAddr, entryOffset, fdwReason, resultPtr uint32) uint32 {
-	return errnoENOSYS
-}

@@ -38,9 +38,9 @@ type polyConfig struct {
 	LowerIdent string // replaces "wasmforge" (e.g., "svcrt")
 
 	// Config struct field name replacements.
-	FieldPayload    string // replaces "WASMData"
-	FieldRawNet     string // replaces "RawSockets"
-	FieldSysAPIs    string // replaces "Win32APIs"
+	FieldPayload     string // replaces "WASMData"
+	FieldRawNet      string // replaces "RawSockets"
+	FieldSysAPIs     string // replaces "Win32APIs"
 	FieldDarwinAPIs  string // replaces "DarwinAPIs"
 	FieldMounts      string // replaces "FSMounts"
 	FieldNoAMSIPatch string // replaces "NoAMSIPatch"
@@ -99,13 +99,13 @@ type polyConfig struct {
 	// PE payload section loading (Windows-only alternative to //go:embed).
 	// When PEPayload is true, the WASM payload is zlib-compressed and injected
 	// as a PE section post-build instead of using //go:embed (which bloats .rdata).
-	PEPayload         bool   // true when payload is in PE section instead of //go:embed
-	PayloadSection    string // PE section name (e.g., ".zdebug_ranges")
-	PayloadMarker     uint32 // Random marker prepended to payload for runtime lookup
-	LoaderFunc        string // function name for PE section loader
-	LoaderDistFunc    string // name for tryDistributed helper
-	LoaderSingleFunc  string // name for trySingle helper
-	LoaderDecompFunc  string // name for zlibDecompress helper
+	PEPayload        bool   // true when payload is in PE section instead of //go:embed
+	PayloadSection   string // PE section name (e.g., ".zdebug_ranges")
+	PayloadMarker    uint32 // Random marker prepended to payload for runtime lookup
+	LoaderFunc       string // function name for PE section loader
+	LoaderDistFunc   string // name for tryDistributed helper
+	LoaderSingleFunc string // name for trySingle helper
+	LoaderDecompFunc string // name for zlibDecompress helper
 
 	// Wazero type name replacements — kills gopclntab method signatures that
 	// YARA rules use to detect WasmForge (e.g., "(*hostFunctionBuilder).Export").
@@ -217,13 +217,14 @@ var payloadKeyVarNames = []string{
 // maintaining natural size relationships between debug sections.
 //
 // Target ratios (averaged from real Go binaries):
-//   .zdebug_info     40.4%
-//   .zdebug_line     23.4%
-//   .zdebug_loclists 20.8%
-//   .zdebug_rnglists  9.8%
-//   .zdebug_frame     4.8%
-//   .zdebug_addr      0.6%
-//   .zdebug_abbrev    0.1%
+//
+//	.zdebug_info     40.4%
+//	.zdebug_line     23.4%
+//	.zdebug_loclists 20.8%
+//	.zdebug_rnglists  9.8%
+//	.zdebug_frame     4.8%
+//	.zdebug_addr      0.6%
+//	.zdebug_abbrev    0.1%
 var payloadDistributionRatios = map[string]float64{
 	".zdebug_info":     40.4,
 	".zdebug_line":     23.4,
@@ -677,11 +678,11 @@ func newPolyConfig(ghostName string) (*polyConfig, error) {
 		mc = "instanceConfig"
 		rt = "lifecycle"
 		cc = "ObjectCache"
-		wot = "InternalType"  // replaces WazeroOnlyType
-		wo = "InternalOnly"   // replaces WazeroOnly
-		gv = "GetVersion"     // replaces GetWazeroVersion
-		wv = "version"        // replaces wazeroVersion
-		ec = "engine"         // replaces "wazero" in error/cache strings
+		wot = "InternalType" // replaces WazeroOnlyType
+		wo = "InternalOnly"  // replaces WazeroOnly
+		gv = "GetVersion"    // replaces GetWazeroVersion
+		wv = "version"       // replaces wazeroVersion
+		ec = "engine"        // replaces "wazero" in error/cache strings
 	}
 	// Wazero engine sub-package renames — use realistic compiler/engine names.
 	realisticEnginePkgs := [][2]string{
@@ -746,7 +747,9 @@ func newPolyConfig(ghostName string) (*polyConfig, error) {
 	// This is done AFTER selecting wazero/hostmod/runtime/names packages so
 	// allPkgUsed is fully populated, preventing dead-code package names from
 	// colliding with any wazero sub-package rename destination.
-	if ghost != nil {
+	if os.Getenv("WASMFORGE_NO_DEADCODE") != "" {
+		pc.DeadCodePkgs = map[string]string{}
+	} else if ghost != nil {
 		pc.DeadCodePkgs = ghost.DeadCodePackages(8, 30, allPkgUsed) // 8 packages, 30 funcs each
 	} else {
 		pc.DeadCodePkgs = deadCodePackages
@@ -793,27 +796,27 @@ func newPolyConfig(ghostName string) (*polyConfig, error) {
 			`if fnd.ModuleName() == wasip1.InternalModuleName {`},
 		{"\tcase \"env\":", "\t} else if fnd.ModuleName() == \"env\" {"},
 		{"\tdefault:\n\t\t// We don't know the scope", "\t} else {\n\t\t// We don't know the scope"},
-		{"assemblyscript", pkgAsmScript},         // 14 chars
-		{"wazevoapi", wvapi},                     // 9 chars — before wazevo
-		{"wasmruntime", pkgWasmRT},               // 11 chars — before wasm
-		{"internalapi", pkgIntAPI},               // 11 chars
-		{"interpreter", pkgInterp},               // 11 chars
-		{"emscripten", pkgEmsc},                  // 10 chars
-		{"wasmdebug", pkgWasmDbg},                // 9 chars — before wasm
-		{"filecache", pkgFCache},                 // 9 chars
-		{"regalloc", "allocator"},                // 8 chars — realistic name
-		{"ieee754", pkgIEEE},                     // 7 chars
-		{"leb128", pkgLEB},                       // 6 chars
-		{"wasip1", pkgWasip1},                    // 6 chars — after wasi_snapshot_preview1
-		{"fsapi", "ioutil"},                      // 5 chars — realistic stdlib name
-		{"sysfs", "osutil"},                      // 5 chars — realistic stdlib name
-		{"wazevo", wve},                          // 6 chars
+		{"assemblyscript", pkgAsmScript}, // 14 chars
+		{"wazevoapi", wvapi},             // 9 chars — before wazevo
+		{"wasmruntime", pkgWasmRT},       // 11 chars — before wasm
+		{"internalapi", pkgIntAPI},       // 11 chars
+		{"interpreter", pkgInterp},       // 11 chars
+		{"emscripten", pkgEmsc},          // 10 chars
+		{"wasmdebug", pkgWasmDbg},        // 9 chars — before wasm
+		{"filecache", pkgFCache},         // 9 chars
+		{"regalloc", "allocator"},        // 8 chars — realistic name
+		{"ieee754", pkgIEEE},             // 7 chars
+		{"leb128", pkgLEB},               // 6 chars
+		{"wasip1", pkgWasip1},            // 6 chars — after wasi_snapshot_preview1
+		{"fsapi", "ioutil"},              // 5 chars — realistic stdlib name
+		{"sysfs", "osutil"},              // 5 chars — realistic stdlib name
+		{"wazevo", wve},                  // 6 chars
 		// WAZEVO cache magic bytes.
 		{"'W', 'A', 'Z', 'E', 'V', 'O'", fmt.Sprintf("'%c', '%c', '%c', '%c', '%c', '%c'",
 			magicBytes[0], magicBytes[1], magicBytes[2], magicBytes[3], magicBytes[4], magicBytes[5])},
 		// Short package names — context-aware regex replacement.
-		{"%%SHORT%%wasm", pkgWasm},   // 4 chars — most generic, must come last
-		{"%%SHORT%%ssa", pkgSSA},     // 3 chars — highest collision risk
+		{"%%SHORT%%wasm", pkgWasm}, // 4 chars — most generic, must come last
+		{"%%SHORT%%ssa", pkgSSA},   // 3 chars — highest collision risk
 
 		// ── Wasm/wasi-prefixed identifiers → STATIC realistic renames ──
 		// These scrub the "Wasm"/"wasi" prefix that identifies the technology
@@ -2098,7 +2101,7 @@ var exportedAnonymizedNames = []string{
 	// Extension API
 	"ext_getfunc", "ext_readout", "ext_resetout", "ext_callback",
 	// Shadow memory
-	"shm_alloc", "shm_protect", "shm_free", "shm_host_addr", "shm_call_entry",
+	"shm_alloc", "shm_protect", "shm_free",
 	// Darwin / macOS frameworks
 	"fw_available", "fw_load", "fw_sym", "fw_call", "fw_call_m", "fw_call_raw",
 	"fw_mem_r", "fw_mem_w",

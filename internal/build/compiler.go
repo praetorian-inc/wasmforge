@@ -1502,7 +1502,7 @@ func patchMemmodForWASM(dir string, verbose bool) error {
 	newRelocDelta := `	// Adjust base address of imported data.
 		// WASM: use the host allocation for the relocation delta.
 	var _wfHostBase uintptr
-	if _wfShadowHostAddr, _wfErr := windows.ShadowGetHostAddr(module.codeBase); _wfErr == nil {
+	if _wfShadowHostAddr, _wfErr := windows.HostMemoryAddress(module.codeBase); _wfErr == nil {
 		_wfHostBase = _wfShadowHostAddr
 	} else {
 		_wfHostBase = module.codeBase
@@ -1515,10 +1515,11 @@ func patchMemmodForWASM(dir string, verbose bool) error {
 	// Store the host base for imageOffset/finalizeSections callers.
 	patched = strings.Replace(patched,
 		"module.headers.OptionalHeader.ImageBase = module.codeBase",
-		"// WASM: store host base so downstream code (imageOffset, etc.) uses the\n\t// address where the DLL actually executes.\n\tif _wfShadowHostAddr, _wfErr := windows.ShadowGetHostAddr(module.codeBase); _wfErr == nil {\n\t\tmodule.headers.OptionalHeader.ImageBase = _wfShadowHostAddr\n\t} else {\n\t\tmodule.headers.OptionalHeader.ImageBase = module.codeBase\n\t}",
+		"// WASM: store host base so downstream code (imageOffset, etc.) uses the\n\t// address where the DLL actually executes.\n\tif _wfShadowHostAddr, _wfErr := windows.HostMemoryAddress(module.codeBase); _wfErr == nil {\n\t\tmodule.headers.OptionalHeader.ImageBase = _wfShadowHostAddr\n\t} else {\n\t\tmodule.headers.OptionalHeader.ImageBase = module.codeBase\n\t}",
 		1)
 
-	// Call DLL entry points through the shadow-memory host trampoline.
+	// Call DLL entry points through the syscall trampoline, which recognizes
+	// shadow allocation entry points and dispatches them to host memory.
 	oldEntry := `	if module.headers.OptionalHeader.AddressOfEntryPoint != 0 {
 		module.entry = module.codeBase + uintptr(module.headers.OptionalHeader.AddressOfEntryPoint)
 		if module.isDLL {
@@ -1535,12 +1536,8 @@ func patchMemmodForWASM(dir string, verbose bool) error {
 	newEntry := `	if module.headers.OptionalHeader.AddressOfEntryPoint != 0 {
 		module.entry = module.codeBase + uintptr(module.headers.OptionalHeader.AddressOfEntryPoint)
 		if module.isDLL {
-			// WASM: call entry point via shadow host execution.
-			r0, entryErr := windows.ShadowCallEntry(module.codeBase, module.headers.OptionalHeader.AddressOfEntryPoint, DLL_PROCESS_ATTACH)
-			if entryErr != nil {
-				err = fmt.Errorf("DLL entry point call failed: %w", entryErr)
-				return
-			}
+			// WASM: syscall trampoline dispatches shadow entry points to host memory.
+			r0, _, _ := syscall.Syscall(module.entry, 3, module.codeBase, uintptr(DLL_PROCESS_ATTACH), 0)
 			if r0 == 0 {
 				err = windows.ERROR_DLL_INIT_FAILED
 				return
@@ -1557,8 +1554,8 @@ func patchMemmodForWASM(dir string, verbose bool) error {
 		module.initialized = false
 	}`
 	newDetach := `	if module.initialized {
-		// WASM: detach via shadow host execution.
-		windows.ShadowCallEntry(module.codeBase, module.headers.OptionalHeader.AddressOfEntryPoint, DLL_PROCESS_DETACH)
+		// WASM: syscall trampoline dispatches shadow entry points to host memory.
+		syscall.Syscall(module.entry, 3, module.codeBase, uintptr(DLL_PROCESS_DETACH), 0)
 		module.initialized = false
 	}`
 	patched = strings.Replace(patched, oldDetach, newDetach, 1)

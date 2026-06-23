@@ -144,8 +144,6 @@ var Exports = map[string]string{
 	"shadow_virtual_alloc":   "shm_alloc",
 	"shadow_virtual_protect": "shm_protect",
 	"shadow_virtual_free":    "shm_free",
-	"shadow_host_addr":       "shm_host_addr",
-	"shadow_call_entry":      "shm_call_entry",
 
 	// ── Darwin / macOS frameworks ─────────────────────────────
 	"darwin_available":  "fw_available",
