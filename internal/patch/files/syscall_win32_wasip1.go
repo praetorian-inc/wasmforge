@@ -42,6 +42,10 @@ func win32_free_library(handle int32) int32
 //go:noescape
 func win32_syscalln(proc int32, nargs int32, argsPtr *byte, ret1Ptr *byte, ret2Ptr *byte, lastErrPtr *byte) int32
 
+//go:wasmimport env mem_addr
+//go:noescape
+func win32_hmem_addr(handle int32, addrPtr uint32) uint32
+
 // Shadow memory host function imports.
 
 //go:wasmimport env shm_alloc
@@ -55,14 +59,6 @@ func shadow_virtual_protect(wasmAddr uint32, size uint32, newProtect uint32, old
 //go:wasmimport env shm_free
 //go:noescape
 func shadow_virtual_free(wasmAddr uint32, size uint32, freeType uint32) uint32
-
-//go:wasmimport env shm_host_addr
-//go:noescape
-func shadow_host_addr(wasmAddr uint32, addrPtr uint32) uint32
-
-//go:wasmimport env shm_call_entry
-//go:noescape
-func shadow_call_entry(wasmAddr uint32, entryOffset uint32, fdwReason uint32, resultPtr uint32) uint32
 
 // ShadowVirtualAlloc registers a shadow allocation. wasmAddr is the WASM-side
 // buffer address, size/allocType/protect are the VirtualAlloc parameters.
@@ -82,16 +78,10 @@ func ShadowVirtualFree(wasmAddr, size, freeType uint32) uint32 {
 	return shadow_virtual_free(wasmAddr, size, freeType)
 }
 
-// ShadowGetHostAddr returns the real host address for a WASM shadow
-// allocation address. Returns 0 on success.
-func ShadowGetHostAddr(wasmAddr uint32, addrPtr uint32) uint32 {
-	return shadow_host_addr(wasmAddr, addrPtr)
-}
-
-// ShadowCallEntry syncs WASM→Host and calls the DLL entry point at
-// entryOffset in the host shadow allocation. Returns 0 on success.
-func ShadowCallEntry(wasmAddr, entryOffset, fdwReason, resultPtr uint32) uint32 {
-	return shadow_call_entry(wasmAddr, entryOffset, fdwReason, resultPtr)
+// HostMemoryAddress returns the real host address for a host memory handle or
+// WASM shadow allocation address. Returns 0 on success.
+func HostMemoryAddress(handleOrAddr uint32, addrPtr uint32) uint32 {
+	return win32_hmem_addr(int32(handleOrAddr), addrPtr)
 }
 
 // putUint64LE writes v to b in little-endian order.
@@ -657,17 +647,17 @@ const (
 	HKEY_PERFORMANCE_DATA = Handle(0x80000004)
 	HKEY_CURRENT_CONFIG   = Handle(0x80000005)
 
-	KEY_QUERY_VALUE    = 0x0001
-	KEY_SET_VALUE      = 0x0002
-	KEY_CREATE_SUB_KEY = 0x0004
+	KEY_QUERY_VALUE        = 0x0001
+	KEY_SET_VALUE          = 0x0002
+	KEY_CREATE_SUB_KEY     = 0x0004
 	KEY_ENUMERATE_SUB_KEYS = 0x0008
-	KEY_NOTIFY         = 0x0010
-	KEY_CREATE_LINK    = 0x0020
-	KEY_WRITE          = 0x20006
-	KEY_READ           = 0x20019
-	KEY_WOW64_64KEY    = 0x0100
-	KEY_WOW64_32KEY    = 0x0200
-	KEY_ALL_ACCESS     = 0xF003F
+	KEY_NOTIFY             = 0x0010
+	KEY_CREATE_LINK        = 0x0020
+	KEY_WRITE              = 0x20006
+	KEY_READ               = 0x20019
+	KEY_WOW64_64KEY        = 0x0100
+	KEY_WOW64_32KEY        = 0x0200
+	KEY_ALL_ACCESS         = 0xF003F
 
 	MAX_ADAPTER_ADDRESS_LENGTH = 8
 
@@ -713,7 +703,7 @@ type RawSockaddr struct {
 // Registry API wrappers via lazy DLL loading.
 
 var (
-	modadvapi32 = NewLazyDLL("advapi32.dll")
+	modadvapi32     = NewLazyDLL("advapi32.dll")
 	modkernel32_reg = NewLazyDLL("kernel32.dll")
 
 	procRegCloseKey      = modadvapi32.NewProc("RegCloseKey")
@@ -819,17 +809,17 @@ const (
 // --- I/O functions ---
 
 var (
-	procReadFile          = modkernel32_reg.NewProc("ReadFile")
-	procWriteFile         = modkernel32_reg.NewProc("WriteFile")
-	procFlushFileBuffers  = modkernel32_reg.NewProc("FlushFileBuffers")
-	procCreateFileW       = modkernel32_reg.NewProc("CreateFileW")
-	procOpenProcess       = modkernel32_reg.NewProc("OpenProcess")
-	procOpenProcessToken  = modadvapi32.NewProc("OpenProcessToken")
-	procGetTokenInfo      = modadvapi32.NewProc("GetTokenInformation")
-	procGetCurrentProcess = modkernel32_reg.NewProc("GetCurrentProcess")
+	procReadFile                 = modkernel32_reg.NewProc("ReadFile")
+	procWriteFile                = modkernel32_reg.NewProc("WriteFile")
+	procFlushFileBuffers         = modkernel32_reg.NewProc("FlushFileBuffers")
+	procCreateFileW              = modkernel32_reg.NewProc("CreateFileW")
+	procOpenProcess              = modkernel32_reg.NewProc("OpenProcess")
+	procOpenProcessToken         = modadvapi32.NewProc("OpenProcessToken")
+	procGetTokenInfo             = modadvapi32.NewProc("GetTokenInformation")
+	procGetCurrentProcess        = modkernel32_reg.NewProc("GetCurrentProcess")
 	procCreateToolhelp32Snapshot = modkernel32_reg.NewProc("CreateToolhelp32Snapshot")
-	procProcess32FirstW   = modkernel32_reg.NewProc("Process32FirstW")
-	procProcess32NextW    = modkernel32_reg.NewProc("Process32NextW")
+	procProcess32FirstW          = modkernel32_reg.NewProc("Process32FirstW")
+	procProcess32NextW           = modkernel32_reg.NewProc("Process32NextW")
 )
 
 // ReadFile reads data from a file handle, optionally with overlapped I/O.

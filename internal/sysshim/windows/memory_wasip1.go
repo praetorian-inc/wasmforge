@@ -127,24 +127,15 @@ func VirtualQuery(address uintptr, buffer *MemoryBasicInformation, length uintpt
 	return syscall.ENOSYS
 }
 
-// ShadowGetHostAddr returns the host address for a WASM shadow allocation.
-func ShadowGetHostAddr(wasmAddr uintptr) (uintptr, error) {
+// HostMemoryAddress returns the host address for a host memory handle or WASM
+// shadow allocation.
+func HostMemoryAddress(handleOrAddr uintptr) (uintptr, error) {
 	var buf [8]byte
-	errno := syscall.ShadowGetHostAddr(uint32(wasmAddr), uint32(uintptr(unsafe.Pointer(&buf[0]))))
+	errno := syscall.HostMemoryAddress(uint32(handleOrAddr), uint32(uintptr(unsafe.Pointer(&buf[0]))))
 	if errno != 0 {
 		return 0, syscall.Errno(errno)
 	}
 	addr := uint64(buf[0]) | uint64(buf[1])<<8 | uint64(buf[2])<<16 | uint64(buf[3])<<24 |
 		uint64(buf[4])<<32 | uint64(buf[5])<<40 | uint64(buf[6])<<48 | uint64(buf[7])<<56
 	return uintptr(addr), nil
-}
-
-// ShadowCallEntry syncs memory and calls DllMain in the host allocation.
-func ShadowCallEntry(wasmAddr uintptr, entryOffset uint32, fdwReason uint32) (uint32, error) {
-	var result uint32
-	errno := syscall.ShadowCallEntry(uint32(wasmAddr), entryOffset, fdwReason, uint32(uintptr(unsafe.Pointer(&result))))
-	if errno != 0 {
-		return 0, syscall.Errno(errno)
-	}
-	return result, nil
 }
