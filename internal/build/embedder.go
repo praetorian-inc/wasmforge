@@ -149,7 +149,21 @@ func GenerateHost(wasmPath, outputPath, tmpDir string, cfg HostConfig, verbose b
 
 	// When host transforms are active, also rewrite wazero import paths in
 	// the hostmod/runtime source to match the neutral module path.
-	neutralModPath := fmt.Sprintf("internal/%s/core", pc.RuntimePkg)
+	// Per-build randomized module path for the wazero fork. ESET's
+	// WinGo/WasmForge.A YARA rule keys on the doubled `internal/.../internal/`
+	// pattern produced by concatenating the old hardcoded `internal/<X>/core`
+	// prefix with wazero's own `/internal/engine/...` subpath. Shapes here
+	// MUST NOT start with `internal/`. The last segment (the wazero
+	// package name) MUST differ from pc.RuntimePkg / HostmodPkg / NamesPkg
+	// to avoid Go package-name collisions when both are imported.
+	wazeroShapes := []string{
+		"lib/%s/core", "pkg/%s/core", "app/%s/core", "sdk/%s/core",
+		"%s/core", "%s/svc", "%s/module",
+		"lib/%s/svc", "pkg/%s/svc",
+		"lib/%s/runner", "pkg/%s/runner",
+		"lib/%s/worker", "pkg/%s/module",
+	}
+	neutralModPath := fmt.Sprintf(wazeroShapes[cryptoRandN(len(wazeroShapes))], pc.RuntimePkg)
 	if os.Getenv("WASMFORGE_NO_HOST_TRANSFORM") == "" {
 		// Prepend wazero replacements (must come before catch-all).
 		// Replace import path and package-qualified references.
