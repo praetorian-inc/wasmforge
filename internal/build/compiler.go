@@ -1171,6 +1171,13 @@ func relaxWindowsBuildConstraints(dir string, verbose bool, targetGOARCH ...stri
 		}
 	}
 
+	// Fifth pass: patch goffloader relocations for shadow-memory addresses.
+	if filterArch != "" && archBitwidth(filterArch) == "64" {
+		if err := patchGOFFLoaderForWASM(dir, verbose); err != nil && verbose {
+			fmt.Fprintf(os.Stderr, "wasmforge: goffloader WASM patch warning: %v\n", err)
+		}
+	}
+
 	if verbose {
 		if count > 0 {
 			fmt.Fprintf(os.Stderr, "wasmforge: relaxed build constraints for %d _windows.go file(s)\n", count)
@@ -1566,6 +1573,88 @@ func patchMemmodForWASM(dir string, verbose bool) error {
 		}
 		if verbose {
 			fmt.Fprintf(os.Stderr, "wasmforge: patched memmod for WASM PE64 compatibility\n")
+		}
+	}
+	return nil
+}
+
+// patchGOFFLoaderForWASM patches goffloader's COFF relocation logic to use
+// host addresses instead of WASM shadow addresses. Without this, REL32/ADDR64/
+// ADDR32NB relocations produce wrong offsets because shadow addresses don't
+// match the host addresses where code actually executes.
+func patchGOFFLoaderForWASM(dir string, verbose bool) error {
+	goffDir := filepath.Join(dir, "vendor", "github.com", "praetorian-inc", "goffloader", "src", "coff")
+	if _, err := os.Stat(goffDir); os.IsNotExist(err) {
+		return nil
+	}
+
+	var mainFile string
+	candidates := []string{"coff_windows.go", "coff_wfwin.go", "coff.go"}
+	for _, name := range candidates {
+		path := filepath.Join(goffDir, name)
+		if data, err := os.ReadFile(path); err == nil {
+			if bytes.Contains(data, []byte("func processRelocation(")) {
+				mainFile = path
+				break
+			}
+		}
+	}
+	if mainFile == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(mainFile)
+	if err != nil {
+		return nil
+	}
+
+	original := string(data)
+	patched := original
+
+	// Patch 1: After computing absoluteSymbolAddress, compute host-space
+	// equivalents for relocation value calculations.
+	patched = strings.Replace(patched,
+		"absoluteSymbolAddress := symbolOffset + sectionAddress\n\n\tsegmentValue :=",
+		"absoluteSymbolAddress := symbolOffset + sectionAddress\n\t_wfHostSection, _ := windows.HostMemoryAddress(sectionAddress)\n\t_wfHostAbsolute := symbolOffset + _wfHostSection\n\n\tsegmentValue :=",
+		1)
+
+	// Patch 2: After the symbolDefAddress adjustment, compute host version.
+	patched = strings.Replace(patched,
+		"symbolDefAddress += (uintptr)(segmentValue)\n\t}\n\n\tsymbolRefAddress := sectionAddress",
+		"symbolDefAddress += (uintptr)(segmentValue)\n\t}\n\t_wfHostSymDef, _ := windows.HostMemoryAddress(symbolDefAddress)\n\n\tsymbolRefAddress := sectionAddress\n\t_ = symbolRefAddress",
+		1)
+
+	// Patch 3: ADDR64 — write the host address, not the shadow address.
+	patched = strings.Replace(patched,
+		"*addr = uint64(symbolDefAddress)",
+		"*addr = uint64(_wfHostSymDef)",
+		1)
+
+	// Patch 4: ADDR32NB — compute using host addresses.
+	patched = strings.Replace(patched,
+		"valueToWrite := symbolDefAddress - (symbolRefAddress + 4 + symbolOffset)",
+		"valueToWrite := _wfHostSymDef - (_wfHostSection + 4 + symbolOffset)",
+		1)
+
+	// Patch 5: REL32 family — compute relative offset using host addresses.
+	patched = strings.Replace(patched,
+		"relativeSymbolDefAddress := symbolDefAddress - (uintptr)(reloc.Type-4) - (absoluteSymbolAddress + 4)",
+		"relativeSymbolDefAddress := _wfHostSymDef - (uintptr)(reloc.Type-4) - (_wfHostAbsolute + 4)",
+		1)
+
+	// Patch 6: Free shadow allocations after BOF execution to prevent
+	// orphaned shadow entries from accumulating and causing sync issues.
+	patched = strings.Replace(patched,
+		"return bofOutput, nil\n}",
+		"// WASM: free shadow allocations to prevent orphaned shadow sync.\n\tfor _, _wfSec := range sections {\n\t\tif _wfSec.Address != 0 {\n\t\t\twindows.VirtualFree(_wfSec.Address, 0, 0x00008000)\n\t\t}\n\t}\n\tif gotBaseAddress != 0 {\n\t\twindows.VirtualFree(gotBaseAddress, 0, 0x00008000)\n\t}\n\treturn bofOutput, nil\n}",
+		1)
+
+	if patched != original {
+		if err := os.WriteFile(mainFile, []byte(patched), 0o644); err != nil {
+			return fmt.Errorf("patching goffloader for WASM: %w", err)
+		}
+		if verbose {
+			fmt.Fprintf(os.Stderr, "wasmforge: patched goffloader for WASM shadow memory relocations\n")
 		}
 	}
 	return nil
