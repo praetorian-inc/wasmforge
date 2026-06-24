@@ -1173,8 +1173,8 @@ func relaxWindowsBuildConstraints(dir string, verbose bool, targetGOARCH ...stri
 
 	// Fifth pass: patch goffloader relocations for shadow-memory addresses.
 	if filterArch != "" && archBitwidth(filterArch) == "64" {
-		if err := patchGOFFLoaderForWASM(dir, verbose); err != nil && verbose {
-			fmt.Fprintf(os.Stderr, "wasmforge: goffloader WASM patch warning: %v\n", err)
+		if err := patchGOFFLoaderForWASM(dir, verbose); err != nil {
+			return nil, nil, fmt.Errorf("patching goffloader for WASM: %w", err)
 		}
 	}
 
@@ -1611,43 +1611,64 @@ func patchGOFFLoaderForWASM(dir string, verbose bool) error {
 	original := string(data)
 	patched := original
 
+	mustReplace := func(s, old, new string) (string, error) {
+		if count := strings.Count(s, old); count != 1 {
+			return s, fmt.Errorf("expected 1 match for goffloader patch needle, found %d", count)
+		}
+		return strings.Replace(s, old, new, 1), nil
+	}
+
 	// Patch 1: After computing absoluteSymbolAddress, compute host-space
-	// equivalents for relocation value calculations.
-	patched = strings.Replace(patched,
+	// equivalents for relocation value calculations. Default to shadow
+	// address if HostMemoryAddress lookup fails.
+	patched, err = mustReplace(patched,
 		"absoluteSymbolAddress := symbolOffset + sectionAddress\n\n\tsegmentValue :=",
-		"absoluteSymbolAddress := symbolOffset + sectionAddress\n\t_wfHostSection, _ := windows.HostMemoryAddress(sectionAddress)\n\t_wfHostAbsolute := symbolOffset + _wfHostSection\n\n\tsegmentValue :=",
-		1)
+		"absoluteSymbolAddress := symbolOffset + sectionAddress\n\t_wfHostSection := sectionAddress\n\tif _wfH, _wfE := windows.HostMemoryAddress(sectionAddress); _wfE == nil {\n\t\t_wfHostSection = _wfH\n\t}\n\t_wfHostAbsolute := symbolOffset + _wfHostSection\n\n\tsegmentValue :=")
+	if err != nil {
+		return fmt.Errorf("patch 1 (host section address): %w", err)
+	}
 
 	// Patch 2: After the symbolDefAddress adjustment, compute host version.
-	patched = strings.Replace(patched,
+	// Default to shadow address if HostMemoryAddress lookup fails.
+	patched, err = mustReplace(patched,
 		"symbolDefAddress += (uintptr)(segmentValue)\n\t}\n\n\tsymbolRefAddress := sectionAddress",
-		"symbolDefAddress += (uintptr)(segmentValue)\n\t}\n\t_wfHostSymDef, _ := windows.HostMemoryAddress(symbolDefAddress)\n\n\tsymbolRefAddress := sectionAddress\n\t_ = symbolRefAddress",
-		1)
+		"symbolDefAddress += (uintptr)(segmentValue)\n\t}\n\t_wfHostSymDef := symbolDefAddress\n\tif _wfH, _wfE := windows.HostMemoryAddress(symbolDefAddress); _wfE == nil {\n\t\t_wfHostSymDef = _wfH\n\t}\n\n\tsymbolRefAddress := sectionAddress\n\t_ = symbolRefAddress")
+	if err != nil {
+		return fmt.Errorf("patch 2 (host symbol address): %w", err)
+	}
 
 	// Patch 3: ADDR64 — write the host address, not the shadow address.
-	patched = strings.Replace(patched,
+	patched, err = mustReplace(patched,
 		"*addr = uint64(symbolDefAddress)",
-		"*addr = uint64(_wfHostSymDef)",
-		1)
+		"*addr = uint64(_wfHostSymDef)")
+	if err != nil {
+		return fmt.Errorf("patch 3 (ADDR64): %w", err)
+	}
 
 	// Patch 4: ADDR32NB — compute using host addresses.
-	patched = strings.Replace(patched,
+	patched, err = mustReplace(patched,
 		"valueToWrite := symbolDefAddress - (symbolRefAddress + 4 + symbolOffset)",
-		"valueToWrite := _wfHostSymDef - (_wfHostSection + 4 + symbolOffset)",
-		1)
+		"valueToWrite := _wfHostSymDef - (_wfHostSection + 4 + symbolOffset)")
+	if err != nil {
+		return fmt.Errorf("patch 4 (ADDR32NB): %w", err)
+	}
 
 	// Patch 5: REL32 family — compute relative offset using host addresses.
-	patched = strings.Replace(patched,
+	patched, err = mustReplace(patched,
 		"relativeSymbolDefAddress := symbolDefAddress - (uintptr)(reloc.Type-4) - (absoluteSymbolAddress + 4)",
-		"relativeSymbolDefAddress := _wfHostSymDef - (uintptr)(reloc.Type-4) - (_wfHostAbsolute + 4)",
-		1)
+		"relativeSymbolDefAddress := _wfHostSymDef - (uintptr)(reloc.Type-4) - (_wfHostAbsolute + 4)")
+	if err != nil {
+		return fmt.Errorf("patch 5 (REL32): %w", err)
+	}
 
 	// Patch 6: Free shadow allocations after BOF execution to prevent
 	// orphaned shadow entries from accumulating and causing sync issues.
-	patched = strings.Replace(patched,
+	patched, err = mustReplace(patched,
 		"return bofOutput, nil\n}",
-		"// WASM: free shadow allocations to prevent orphaned shadow sync.\n\tfor _, _wfSec := range sections {\n\t\tif _wfSec.Address != 0 {\n\t\t\twindows.VirtualFree(_wfSec.Address, 0, 0x00008000)\n\t\t}\n\t}\n\tif gotBaseAddress != 0 {\n\t\twindows.VirtualFree(gotBaseAddress, 0, 0x00008000)\n\t}\n\treturn bofOutput, nil\n}",
-		1)
+		"// WASM: free shadow allocations to prevent orphaned shadow sync.\n\tfor _, _wfSec := range sections {\n\t\tif _wfSec.Address != 0 {\n\t\t\twindows.VirtualFree(_wfSec.Address, 0, 0x00008000)\n\t\t}\n\t}\n\tif gotBaseAddress != 0 {\n\t\twindows.VirtualFree(gotBaseAddress, 0, 0x00008000)\n\t}\n\treturn bofOutput, nil\n}")
+	if err != nil {
+		return fmt.Errorf("patch 6 (VirtualFree cleanup): %w", err)
+	}
 
 	if patched != original {
 		if err := os.WriteFile(mainFile, []byte(patched), 0o644); err != nil {
